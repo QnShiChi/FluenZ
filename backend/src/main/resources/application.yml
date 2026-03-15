@@ -19,3 +19,9 @@ spring:
 
 server:
   port: 8080
+
+# ---------- JWT ----------
+jwt:
+  secret: ${JWT_SECRET:fluenz-default-secret-key-change-in-production-min-32-chars!!}
+  access-expiration: ${JWT_ACCESS_EXPIRATION:86400000}
+  refresh-expiration: ${JWT_REFRESH_EXPIRATION:604800000}
