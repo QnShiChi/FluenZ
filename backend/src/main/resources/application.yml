@@ -1,0 +1,21 @@
+spring:
+  application:
+    name: fluenz-api
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/fluenz_db}
+    username: ${SPRING_DATASOURCE_USERNAME:fluenz_user}
+    password: ${SPRING_DATASOURCE_PASSWORD:fluenz_secret}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+server:
+  port: 8080
