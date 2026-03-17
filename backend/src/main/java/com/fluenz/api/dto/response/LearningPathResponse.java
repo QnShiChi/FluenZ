@@ -1,12 +1,12 @@
 package com.fluenz.api.dto.response;
 
-import com.fluenz.api.entity.enums.PathStatus;
+import com.fluenz.api.entity.enums.Level;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -16,8 +16,11 @@ import java.util.UUID;
 public class LearningPathResponse {
     private UUID id;
     private String title;
-    private PathStatus status;
-    private UUID professionId;
+    private String status;
     private String professionName;
-    private LocalDateTime createdAt;
+    private Level userLevel;
+    private int topicCount;
+    private int situationCount;
+    private int chunkCount;
+    private List<TopicResponse> topics;
 }

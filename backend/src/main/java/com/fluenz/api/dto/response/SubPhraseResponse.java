@@ -12,13 +12,13 @@ import java.util.UUID;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ChunkResponse {
+public class SubPhraseResponse {
     private UUID id;
-    private String contextQuestion;
-    private String contextTranslation;
-    private String rootSentence;
-    private String rootTranslation;
-    private String rootIpa;
+    private String text;
+    private String translation;
+    private String ipa;
+    private List<String> distractors;
     private int orderIndex;
-    private List<SubPhraseResponse> subPhrases;
+    private boolean isLearned;
+    private boolean isBookmarked;
 }

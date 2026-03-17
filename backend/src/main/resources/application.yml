@@ -25,3 +25,9 @@ jwt:
   secret: ${JWT_SECRET:fluenz-default-secret-key-change-in-production-min-32-chars!!}
   access-expiration: ${JWT_ACCESS_EXPIRATION:86400000}
   refresh-expiration: ${JWT_REFRESH_EXPIRATION:604800000}
+
+# ---------- OpenRouter (LLM) ----------
+openrouter:
+  api-key: ${OPENROUTER_API_KEY:}
+  model: ${OPENROUTER_MODEL:google/gemini-2.0-flash-001}
+  base-url: ${OPENROUTER_BASE_URL:https://openrouter.ai/api/v1}

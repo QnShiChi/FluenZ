@@ -33,5 +33,5 @@ public class LearningPath extends BaseEntity {
 
     @OneToMany(mappedBy = "learningPath", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
-    private List<Situation> situations = new ArrayList<>();
+    private List<Topic> topics = new ArrayList<>();
 }
