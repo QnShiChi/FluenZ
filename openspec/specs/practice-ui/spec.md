@@ -50,3 +50,32 @@ The frontend SHALL add route `/practice/:situationId` that loads the practice fl
 #### Scenario: Navigation from situation detail
 - **WHEN** user clicks "Bắt đầu học" on SituationDetailPage
 - **THEN** browser navigates to `/practice/{situationId}` and practice begins
+
+### Requirement: Auto-play TTS on step entry
+On entering any pronunciation step (SPEAK, FULL_SENTENCE, FILL_BLANK), the system SHALL automatically play TTS audio of the target phrase. The mic button MUST be disabled until TTS playback completes.
+
+#### Scenario: TTS auto-play
+- **WHEN** user transitions to a pronunciation step
+- **THEN** TTS plays the target phrase automatically and mic button is disabled until playback ends
+
+### Requirement: Score gate (minimum 70)
+After speech evaluation, the "Tiếp tục" button SHALL only appear if `overallScore ≥ 70`. Below 70, user must re-record.
+
+#### Scenario: Score below threshold
+- **WHEN** user scores below 70
+- **THEN** "Tiếp tục" button is hidden and message "Thử lại — bạn cần đạt ít nhất 70 điểm" is shown
+
+#### Scenario: Score above threshold
+- **WHEN** user scores 70 or above
+- **THEN** "Tiếp tục" button appears normally
+
+### Requirement: Fill-blank reveal/hide toggle
+In FILL_BLANK steps, the system SHALL reveal the full sentence (replace blanks with actual text) after evaluation. The blanked portion SHALL re-hide when user presses mic to retry.
+
+#### Scenario: Reveal after evaluation
+- **WHEN** user completes evaluation in a FILL_BLANK step
+- **THEN** full sentence is displayed (blanks replaced with actual text)
+
+#### Scenario: Re-hide on retry
+- **WHEN** user presses mic to retry in a FILL_BLANK step
+- **THEN** blanked portion is hidden again
