@@ -8,6 +8,7 @@ import com.fluenz.api.dto.response.*;
 import com.fluenz.api.entity.*;
 import com.fluenz.api.entity.enums.PathStatus;
 import com.fluenz.api.repository.*;
+import com.fluenz.api.service.RoleplayService;
 import com.fluenz.api.service.SpeechEvaluationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -27,10 +28,12 @@ import java.util.stream.Collectors;
 public class PracticeController {
 
     private final SpeechEvaluationService evaluationService;
+    private final RoleplayService roleplayService;
     private final UserRepository userRepository;
     private final LearningPathRepository learningPathRepository;
     private final PracticeSessionRepository practiceSessionRepository;
     private final UserSubPhraseProgressRepository progressRepository;
+    private final SituationRepository situationRepository;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @PostMapping("/evaluate-text")
@@ -155,5 +158,40 @@ public class PracticeController {
                 "sessionId", saved.getId(),
                 "message", "Practice session saved successfully"
         ));
+    }
+
+    // ==================== ROLEPLAY CHAT ====================
+
+    @PostMapping("/roleplay/chat")
+    public ResponseEntity<?> roleplayChat(@RequestBody Map<String, Object> request) {
+        try {
+            String situationId = (String) request.get("situationId");
+            List<Map<String, String>> chatHistory = (List<Map<String, String>>) request.get("chatHistory");
+            int turnNumber = (int) request.get("turnNumber");
+
+            // Load situation with chunks
+            Situation situation = situationRepository.findById(UUID.fromString(situationId))
+                    .orElseThrow(() -> new RuntimeException("Situation not found"));
+
+            // Extract target chunk texts from all sub-phrases
+            List<String> targetChunks = situation.getChunks().stream()
+                    .flatMap(chunk -> chunk.getSubPhrases().stream())
+                    .map(SubPhrase::getText)
+                    .toList();
+
+            String response = roleplayService.chat(
+                    situation.getTitle(),
+                    situation.getDescription(),
+                    targetChunks,
+                    chatHistory,
+                    turnNumber
+            );
+
+            return ResponseEntity.ok(Map.of("response", response));
+        } catch (Exception e) {
+            log.error("Roleplay chat error", e);
+            return ResponseEntity.internalServerError()
+                    .body(Map.of("error", e.getMessage()));
+        }
     }
 }
