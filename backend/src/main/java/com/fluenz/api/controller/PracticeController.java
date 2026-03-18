@@ -92,6 +92,7 @@ public class PracticeController {
                                 } catch (JsonProcessingException e) {
                                     spMap.put("distractors", List.of());
                                 }
+                                spMap.put("imageUrl", sp.getImageUrl());
                                 return spMap;
                             })
                             .toList();

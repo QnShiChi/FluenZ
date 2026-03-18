@@ -42,6 +42,7 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL}
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL}
+      UNSPLASH_ACCESS_KEY: ${UNSPLASH_ACCESS_KEY}
     depends_on:
       postgres:
         condition: service_healthy

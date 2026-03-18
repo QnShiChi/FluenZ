@@ -82,6 +82,7 @@ public class LlmService {
         private String translation;
         private String ipa;
         private List<String> distractors;
+        private String imageKeyword;
     }
 
     public LlmLearningPath generateLearningPath(
@@ -148,6 +149,7 @@ public class LlmService {
                 8. Each variableChunk.distractors has exactly 2 wrong but plausible alternatives
                 9. rootDistractors has exactly 2 wrong but plausible alternatives for the root sentence
                 10. IPA must be accurate International Phonetic Alphabet transcription
+                11. Each variableChunk.imageKeyword is a 2-4 word English phrase suitable for stock photo search (e.g., "team meeting whiteboard", "user feedback laptop")
                 
                 Example chunk:
                 {
@@ -158,8 +160,8 @@ public class LlmService {
                   "rootIpa": "/wiː niːd tuː tʃeɪndʒ/",
                   "rootDistractors": ["We want to keep", "They have to build"],
                   "variableChunks": [
-                    {"text": "due to new requirements", "translation": "do yêu cầu mới", "ipa": "/djuː tuː njuː rɪˈkwaɪəmənts/", "distractors": ["because of old features", "thanks to the budget"]},
-                    {"text": "because of user feedback", "translation": "vì phản hồi người dùng", "ipa": "/bɪˈkɒz ɒv ˈjuːzə ˈfiːdbæk/", "distractors": ["due to team decision", "for the next sprint"]}
+                    {"text": "due to new requirements", "translation": "do yêu cầu mới", "ipa": "/djuː tuː njuː rɪˈkwaɪəmənts/", "distractors": ["because of old features", "thanks to the budget"], "imageKeyword": "requirements document office"},
+                    {"text": "because of user feedback", "translation": "vì phản hồi người dùng", "ipa": "/bɪˈkɒz ɒv ˈjuːzə ˈfiːdbæk/", "distractors": ["due to team decision", "for the next sprint"], "imageKeyword": "user feedback laptop"}
                   ]
                 }
                 
@@ -182,7 +184,7 @@ public class LlmService {
                               "rootIpa": "/IPA/",
                               "rootDistractors": ["wrong root 1", "wrong root 2"],
                               "variableChunks": [
-                                {"text": "chunk text", "translation": "nghĩa tiếng Việt", "ipa": "/IPA/", "distractors": ["wrong 1", "wrong 2"]}
+                                {"text": "chunk text", "translation": "nghĩa tiếng Việt", "ipa": "/IPA/", "distractors": ["wrong 1", "wrong 2"], "imageKeyword": "search keyword"}
                               ]
                             }
                           ]
@@ -207,7 +209,7 @@ public class LlmService {
                         Map.of("role", "user", "content", prompt)
                 ),
                 "temperature", 0.7,
-                "max_tokens", 4096
+                "max_tokens", 8192
         );
 
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);

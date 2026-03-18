@@ -18,6 +18,7 @@ public class SubPhraseResponse {
     private String translation;
     private String ipa;
     private List<String> distractors;
+    private String imageUrl;
     private int orderIndex;
     private boolean isLearned;
     private boolean isBookmarked;

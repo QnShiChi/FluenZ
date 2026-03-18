@@ -26,6 +26,7 @@ public class OnboardingService {
     private final LearningPathRepository learningPathRepository;
     private final UserSubPhraseProgressRepository progressRepository;
     private final LlmService llmService;
+    private final ImageService imageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Transactional
@@ -104,11 +105,16 @@ public class OnboardingService {
                                                             } catch (JsonProcessingException e) {
                                                                 log.warn("Failed to serialize distractors", e);
                                                             }
+                                                            String imageUrl = null;
+                                                            if (vc.getImageKeyword() != null && !vc.getImageKeyword().isBlank()) {
+                                                                imageUrl = imageService.fetchImageUrl(vc.getImageKeyword());
+                                                            }
                                                             return SubPhrase.builder()
                                                                     .text(vc.getText())
                                                                     .translation(vc.getTranslation())
                                                                     .ipa(vc.getIpa())
                                                                     .distractors(distractorsJson)
+                                                                    .imageUrl(imageUrl)
                                                                     .orderIndex(spi)
                                                                     .chunk(chunk)
                                                                     .build();
@@ -239,6 +245,7 @@ public class OnboardingService {
                             .translation(sp.getTranslation())
                             .ipa(sp.getIpa())
                             .distractors(distractorsList)
+                            .imageUrl(sp.getImageUrl())
                             .orderIndex(sp.getOrderIndex())
                             .isLearned(isLearned)
                             .isBookmarked(isBookmarked)

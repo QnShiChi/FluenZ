@@ -24,6 +24,9 @@ public class SubPhrase extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private String distractors;
 
+    @Column(columnDefinition = "TEXT")
+    private String imageUrl;
+
     @Column(nullable = false)
     private Integer orderIndex;
 
