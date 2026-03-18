@@ -136,7 +136,7 @@ public class LlmService {
                   * rootTranslation: Vietnamese translation of the root sentence
                   * rootIpa: IPA phonetic transcription of rootSentence (without the blanks)
                   * rootDistractors: 2 wrong English phrases that look similar but are incorrect alternatives for the root
-                  * variableChunks: 2-4 objects, each with text, ipa (IPA phonetics), and distractors (2 wrong alternatives)
+                  * variableChunks: EXACTLY 3 objects, each with text, ipa (IPA phonetics), and distractors (2 wrong alternatives)
                 
                 Rules:
                 1. Topic names in Vietnamese
@@ -150,6 +150,7 @@ public class LlmService {
                 9. rootDistractors has exactly 2 wrong but plausible alternatives for the root sentence
                 10. IPA must be accurate International Phonetic Alphabet transcription
                 11. Each variableChunk.imageKeyword is a 2-4 word English phrase suitable for stock photo search (e.g., "team meeting whiteboard", "user feedback laptop")
+                12. CRITICAL: You MUST generate EXACTLY 3 variableChunks for each chunk. Not 2, not 4 — exactly 3.
                 
                 Example chunk:
                 {
@@ -161,7 +162,8 @@ public class LlmService {
                   "rootDistractors": ["We want to keep", "They have to build"],
                   "variableChunks": [
                     {"text": "due to new requirements", "translation": "do yêu cầu mới", "ipa": "/djuː tuː njuː rɪˈkwaɪəmənts/", "distractors": ["because of old features", "thanks to the budget"], "imageKeyword": "requirements document office"},
-                    {"text": "because of user feedback", "translation": "vì phản hồi người dùng", "ipa": "/bɪˈkɒz ɒv ˈjuːzə ˈfiːdbæk/", "distractors": ["due to team decision", "for the next sprint"], "imageKeyword": "user feedback laptop"}
+                    {"text": "because of user feedback", "translation": "vì phản hồi người dùng", "ipa": "/bɪˈkɒz ɒv ˈjuːzə ˈfiːdbæk/", "distractors": ["due to team decision", "for the next sprint"], "imageKeyword": "user feedback laptop"},
+                    {"text": "for technical reasons", "translation": "vì lý do kỹ thuật", "ipa": "/fɔːr ˈteknɪkl ˈriːznz/", "distractors": ["with business purposes", "from design changes"], "imageKeyword": "technical engineering code"}
                   ]
                 }
                 
