@@ -10,6 +10,7 @@ import com.fluenz.api.entity.enums.PathStatus;
 import com.fluenz.api.repository.DefaultCatalogVersionRepository;
 import com.fluenz.api.repository.LearningPathRepository;
 import com.fluenz.api.repository.UserDefaultSubPhraseProgressRepository;
+import com.fluenz.api.repository.UserDefaultChunkProgressRepository;
 import com.fluenz.api.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +28,7 @@ public class LearningExperienceService {
     private final LearningPathRepository learningPathRepository;
     private final DefaultCatalogVersionRepository defaultCatalogVersionRepository;
     private final UserDefaultSubPhraseProgressRepository userDefaultSubPhraseProgressRepository;
+    private final UserDefaultChunkProgressRepository userDefaultChunkProgressRepository;
     private final OnboardingService onboardingService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -96,14 +98,19 @@ public class LearningExperienceService {
 
     private LearningPathResponse mapDefaultCatalogToResponse(User user, DefaultCatalogVersion version) {
         Map<UUID, UserDefaultSubPhraseProgress> progressMap = new HashMap<>();
+        Set<UUID> completedChunkIds = new HashSet<>();
+        
         if (user.getId() != null) {
             userDefaultSubPhraseProgressRepository.findByUserId(user.getId())
                     .forEach(p -> progressMap.put(p.getDefaultSubPhrase().getId(), p));
+            userDefaultChunkProgressRepository.findByUserId(user.getId())
+                    .stream().filter(p -> Boolean.TRUE.equals(p.getIsCompleted()))
+                    .forEach(p -> completedChunkIds.add(p.getDefaultChunk().getId()));
         }
 
         List<TopicResponse> topicResponses = version.getTopics().stream()
                 .sorted(Comparator.comparingInt(DefaultTopic::getOrderIndex))
-                .map(topic -> mapDefaultTopic(topic, progressMap))
+                .map(topic -> mapDefaultTopic(topic, progressMap, completedChunkIds))
                 .toList();
 
         int situationCount = topicResponses.stream().mapToInt(TopicResponse::getSituationCount).sum();
@@ -126,10 +133,10 @@ public class LearningExperienceService {
                 .build();
     }
 
-    private TopicResponse mapDefaultTopic(DefaultTopic topic, Map<UUID, UserDefaultSubPhraseProgress> progressMap) {
+    private TopicResponse mapDefaultTopic(DefaultTopic topic, Map<UUID, UserDefaultSubPhraseProgress> progressMap, Set<UUID> completedChunkIds) {
         List<SituationResponse> situations = topic.getSituations().stream()
                 .sorted(Comparator.comparingInt(DefaultSituation::getOrderIndex))
-                .map(situation -> mapDefaultSituation(situation, progressMap))
+                .map(situation -> mapDefaultSituation(situation, progressMap, completedChunkIds))
                 .toList();
 
         return TopicResponse.builder()
@@ -141,10 +148,10 @@ public class LearningExperienceService {
                 .build();
     }
 
-    private SituationResponse mapDefaultSituation(DefaultSituation situation, Map<UUID, UserDefaultSubPhraseProgress> progressMap) {
+    private SituationResponse mapDefaultSituation(DefaultSituation situation, Map<UUID, UserDefaultSubPhraseProgress> progressMap, Set<UUID> completedChunkIds) {
         List<ChunkResponse> chunks = situation.getChunks().stream()
                 .sorted(Comparator.comparingInt(DefaultChunk::getOrderIndex))
-                .map(chunk -> mapDefaultChunk(chunk, progressMap))
+                .map(chunk -> mapDefaultChunk(chunk, progressMap, completedChunkIds))
                 .toList();
 
         return SituationResponse.builder()
@@ -159,7 +166,7 @@ public class LearningExperienceService {
                 .build();
     }
 
-    private ChunkResponse mapDefaultChunk(DefaultChunk chunk, Map<UUID, UserDefaultSubPhraseProgress> progressMap) {
+    private ChunkResponse mapDefaultChunk(DefaultChunk chunk, Map<UUID, UserDefaultSubPhraseProgress> progressMap, Set<UUID> completedChunkIds) {
         List<SubPhraseResponse> subPhrases = chunk.getSubPhrases().stream()
                 .sorted(Comparator.comparingInt(DefaultSubPhrase::getOrderIndex))
                 .map(sp -> {
@@ -194,6 +201,7 @@ public class LearningExperienceService {
                 .rootTranslation(chunk.getRootTranslation())
                 .rootIpa(chunk.getRootIpa())
                 .orderIndex(chunk.getOrderIndex())
+                .isCompleted(completedChunkIds.contains(chunk.getId()))
                 .subPhrases(subPhrases)
                 .build();
     }

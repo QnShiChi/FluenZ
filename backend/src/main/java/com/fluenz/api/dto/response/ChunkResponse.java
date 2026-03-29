@@ -20,5 +20,6 @@ public class ChunkResponse {
     private String rootTranslation;
     private String rootIpa;
     private int orderIndex;
+    private boolean isCompleted;
     private List<SubPhraseResponse> subPhrases;
 }

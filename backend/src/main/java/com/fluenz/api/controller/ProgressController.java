@@ -10,6 +10,9 @@ import com.fluenz.api.repository.UserDefaultSubPhraseProgressRepository;
 import com.fluenz.api.repository.SubPhraseRepository;
 import com.fluenz.api.repository.UserRepository;
 import com.fluenz.api.repository.UserSubPhraseProgressRepository;
+import com.fluenz.api.service.ProgressService;
+import com.fluenz.api.dto.response.ProgressDeltaResponse;
+import com.fluenz.api.dto.response.UserProfileResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -28,6 +31,27 @@ public class ProgressController {
     private final UserSubPhraseProgressRepository progressRepository;
     private final DefaultSubPhraseRepository defaultSubPhraseRepository;
     private final UserDefaultSubPhraseProgressRepository defaultProgressRepository;
+    private final ProgressService progressService;
+
+    @PostMapping("/chunk-complete/{chunkId}")
+    public ResponseEntity<ProgressDeltaResponse> completeChunk(
+            @PathVariable UUID chunkId,
+            @RequestParam(defaultValue = "false") boolean isDefault,
+            Authentication authentication
+    ) {
+        return ResponseEntity.ok(progressService.markChunkComplete(authentication.getName(), chunkId, isDefault));
+    }
+
+    @PostMapping("/voice-activity")
+    public ResponseEntity<Void> recordVoiceActivity(Authentication authentication) {
+        progressService.recordVoiceActivity(authentication.getName());
+        return ResponseEntity.ok().build();
+    }
+
+    @GetMapping("/profile")
+    public ResponseEntity<UserProfileResponse> getUserProfile(Authentication authentication) {
+        return ResponseEntity.ok(progressService.getUserProfile(authentication.getName()));
+    }
 
     @PutMapping("/{subPhraseId}/learned")
     public ResponseEntity<Map<String, Object>> toggleLearned(
