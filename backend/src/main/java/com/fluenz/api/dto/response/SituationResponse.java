@@ -17,6 +17,7 @@ public class SituationResponse {
     private UUID id;
     private String title;
     private String description;
+    private String thumbnailUrl;
     private Level level;
     private int orderIndex;
     private int chunkCount;

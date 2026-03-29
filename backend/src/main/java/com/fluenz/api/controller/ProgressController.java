@@ -1,8 +1,12 @@
 package com.fluenz.api.controller;
 
+import com.fluenz.api.entity.DefaultSubPhrase;
 import com.fluenz.api.entity.SubPhrase;
 import com.fluenz.api.entity.User;
+import com.fluenz.api.entity.UserDefaultSubPhraseProgress;
 import com.fluenz.api.entity.UserSubPhraseProgress;
+import com.fluenz.api.repository.DefaultSubPhraseRepository;
+import com.fluenz.api.repository.UserDefaultSubPhraseProgressRepository;
 import com.fluenz.api.repository.SubPhraseRepository;
 import com.fluenz.api.repository.UserRepository;
 import com.fluenz.api.repository.UserSubPhraseProgressRepository;
@@ -22,18 +26,19 @@ public class ProgressController {
     private final UserRepository userRepository;
     private final SubPhraseRepository subPhraseRepository;
     private final UserSubPhraseProgressRepository progressRepository;
+    private final DefaultSubPhraseRepository defaultSubPhraseRepository;
+    private final UserDefaultSubPhraseProgressRepository defaultProgressRepository;
 
     @PutMapping("/{subPhraseId}/learned")
     public ResponseEntity<Map<String, Object>> toggleLearned(
             @PathVariable UUID subPhraseId,
             Authentication authentication
     ) {
-        UserSubPhraseProgress progress = getOrCreateProgress(authentication.getName(), subPhraseId);
-        progress.setIsLearned(!progress.getIsLearned());
-        progressRepository.save(progress);
+        ProgressToggleResult result = getOrCreateProgress(authentication.getName(), subPhraseId);
+        result.toggleLearned();
         return ResponseEntity.ok(Map.of(
                 "subPhraseId", subPhraseId,
-                "isLearned", progress.getIsLearned()
+                "isLearned", result.isLearned()
         ));
     }
 
@@ -42,27 +47,105 @@ public class ProgressController {
             @PathVariable UUID subPhraseId,
             Authentication authentication
     ) {
-        UserSubPhraseProgress progress = getOrCreateProgress(authentication.getName(), subPhraseId);
-        progress.setIsBookmarked(!progress.getIsBookmarked());
-        progressRepository.save(progress);
+        ProgressToggleResult result = getOrCreateProgress(authentication.getName(), subPhraseId);
+        result.toggleBookmarked();
         return ResponseEntity.ok(Map.of(
                 "subPhraseId", subPhraseId,
-                "isBookmarked", progress.getIsBookmarked()
+                "isBookmarked", result.isBookmarked()
         ));
     }
 
-    private UserSubPhraseProgress getOrCreateProgress(String email, UUID subPhraseId) {
+    private ProgressToggleResult getOrCreateProgress(String email, UUID subPhraseId) {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("User not found"));
-        SubPhrase subPhrase = subPhraseRepository.findById(subPhraseId)
-                .orElseThrow(() -> new RuntimeException("SubPhrase not found"));
 
-        return progressRepository.findByUserIdAndSubPhraseId(user.getId(), subPhraseId)
-                .orElseGet(() -> UserSubPhraseProgress.builder()
-                        .user(user)
-                        .subPhrase(subPhrase)
-                        .isLearned(false)
-                        .isBookmarked(false)
-                        .build());
+        return subPhraseRepository.findById(subPhraseId)
+                .<ProgressToggleResult>map(subPhrase -> new PersonalizedProgressToggleResult(
+                        progressRepository.findByUserIdAndSubPhraseId(user.getId(), subPhraseId)
+                                .orElseGet(() -> UserSubPhraseProgress.builder()
+                                        .user(user)
+                                        .subPhrase(subPhrase)
+                                        .isLearned(false)
+                                        .isBookmarked(false)
+                                        .build())
+                ))
+                .or(() -> defaultSubPhraseRepository.findById(subPhraseId)
+                        .map(defaultSubPhrase -> new DefaultProgressToggleResult(
+                                defaultProgressRepository.findByUserIdAndDefaultSubPhraseId(user.getId(), subPhraseId)
+                                        .orElseGet(() -> UserDefaultSubPhraseProgress.builder()
+                                                .user(user)
+                                                .defaultSubPhrase(defaultSubPhrase)
+                                                .isLearned(false)
+                                                .isBookmarked(false)
+                                                .build())
+                        )))
+                .orElseThrow(() -> new RuntimeException("SubPhrase not found"));
+    }
+
+    private sealed interface ProgressToggleResult permits PersonalizedProgressToggleResult, DefaultProgressToggleResult {
+        void toggleLearned();
+        void toggleBookmarked();
+        boolean isLearned();
+        boolean isBookmarked();
+    }
+
+    private final class PersonalizedProgressToggleResult implements ProgressToggleResult {
+        private final UserSubPhraseProgress progress;
+
+        private PersonalizedProgressToggleResult(UserSubPhraseProgress progress) {
+            this.progress = progress;
+        }
+
+        @Override
+        public void toggleLearned() {
+            progress.setIsLearned(!progress.getIsLearned());
+            progressRepository.save(progress);
+        }
+
+        @Override
+        public void toggleBookmarked() {
+            progress.setIsBookmarked(!progress.getIsBookmarked());
+            progressRepository.save(progress);
+        }
+
+        @Override
+        public boolean isLearned() {
+            return Boolean.TRUE.equals(progress.getIsLearned());
+        }
+
+        @Override
+        public boolean isBookmarked() {
+            return Boolean.TRUE.equals(progress.getIsBookmarked());
+        }
+    }
+
+    private final class DefaultProgressToggleResult implements ProgressToggleResult {
+        private final UserDefaultSubPhraseProgress progress;
+
+        private DefaultProgressToggleResult(UserDefaultSubPhraseProgress progress) {
+            this.progress = progress;
+        }
+
+        @Override
+        public void toggleLearned() {
+            progress.setIsLearned(!progress.getIsLearned());
+            defaultProgressRepository.save(progress);
+        }
+
+        @Override
+        public void toggleBookmarked() {
+            progress.setIsBookmarked(!progress.getIsBookmarked());
+            defaultProgressRepository.save(progress);
+        }
+
+        @Override
+        public boolean isLearned() {
+            return Boolean.TRUE.equals(progress.getIsLearned());
+        }
+
+        @Override
+        public boolean isBookmarked() {
+            return Boolean.TRUE.equals(progress.getIsBookmarked());
+        }
     }
 }

@@ -1,6 +1,8 @@
 package com.fluenz.api.dto.response;
 
+import com.fluenz.api.entity.enums.LearningMode;
 import com.fluenz.api.entity.enums.Level;
+import com.fluenz.api.entity.enums.UserRole;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -18,6 +20,8 @@ public class UserResponse {
     private String email;
     private String username;
     private Level currentLevel;
+    private UserRole role;
+    private LearningMode preferredLearningMode;
     private String goals;
     private LocalDateTime createdAt;
 }

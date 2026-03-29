@@ -3,6 +3,7 @@ package com.fluenz.api.service;
 import com.fluenz.api.dto.request.OnboardingRequest;
 import com.fluenz.api.dto.response.*;
 import com.fluenz.api.entity.*;
+import com.fluenz.api.entity.enums.LearningMode;
 import com.fluenz.api.entity.enums.Level;
 import com.fluenz.api.entity.enums.PathStatus;
 import com.fluenz.api.repository.*;
@@ -134,6 +135,8 @@ public class OnboardingService {
                 }).toList();
 
         path.setTopics(new ArrayList<>(topics));
+        user.setPreferredLearningMode(LearningMode.PERSONALIZED);
+        userRepository.save(user);
         LearningPath saved = learningPathRepository.save(path);
 
         return mapToResponse(saved, null);
@@ -181,6 +184,7 @@ public class OnboardingService {
                 .id(path.getId())
                 .title(path.getTitle())
                 .status(path.getStatus().name())
+                .learningMode(LearningMode.PERSONALIZED)
                 .professionName(path.getProfession().getName())
                 .userLevel(path.getUser().getCurrentLevel())
                 .topicCount(topicResponses.size())
@@ -213,6 +217,7 @@ public class OnboardingService {
                 .id(situation.getId())
                 .title(situation.getTitle())
                 .description(situation.getDescription())
+                .thumbnailUrl(situation.getThumbnailUrl())
                 .level(situation.getLevel())
                 .orderIndex(situation.getOrderIndex())
                 .chunkCount(chunks.size())

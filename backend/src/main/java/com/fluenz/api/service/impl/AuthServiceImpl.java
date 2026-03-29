@@ -5,7 +5,11 @@ import com.fluenz.api.dto.request.RefreshTokenRequest;
 import com.fluenz.api.dto.request.RegisterRequest;
 import com.fluenz.api.dto.response.AuthResponse;
 import com.fluenz.api.dto.response.UserResponse;
+import com.fluenz.api.entity.DefaultCatalogVersion;
 import com.fluenz.api.entity.User;
+import com.fluenz.api.entity.enums.LearningMode;
+import com.fluenz.api.entity.enums.UserRole;
+import com.fluenz.api.repository.DefaultCatalogVersionRepository;
 import com.fluenz.api.repository.UserRepository;
 import com.fluenz.api.service.AuthService;
 import com.fluenz.api.service.JwtService;
@@ -23,6 +27,7 @@ public class AuthServiceImpl implements AuthService {
     private final JwtService jwtService;
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
+    private final DefaultCatalogVersionRepository defaultCatalogVersionRepository;
 
     @Override
     public AuthResponse register(RegisterRequest request) {
@@ -42,6 +47,9 @@ public class AuthServiceImpl implements AuthService {
                 .username(request.getUsername())
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
                 .currentLevel(request.getCurrentLevel())
+                .role(UserRole.USER)
+                .preferredLearningMode(LearningMode.DEFAULT)
+                .activeDefaultCatalogVersion(resolveCurrentPublishedDefaultVersion())
                 .goals(request.getGoals())
                 .build();
 
@@ -96,6 +104,8 @@ public class AuthServiceImpl implements AuthService {
                 .email(user.getEmail())
                 .username(user.getUsername())
                 .currentLevel(user.getCurrentLevel())
+                .role(user.getRole())
+                .preferredLearningMode(user.getPreferredLearningMode())
                 .goals(user.getGoals())
                 .createdAt(user.getCreatedAt())
                 .build();
@@ -109,7 +119,14 @@ public class AuthServiceImpl implements AuthService {
                 .email(user.getEmail())
                 .username(user.getUsername())
                 .currentLevel(user.getCurrentLevel())
+                .role(user.getRole())
+                .preferredLearningMode(user.getPreferredLearningMode())
                 .goals(user.getGoals())
                 .build();
+    }
+
+    private DefaultCatalogVersion resolveCurrentPublishedDefaultVersion() {
+        return defaultCatalogVersionRepository.findFirstByPublishedTrueOrderByVersionNumberDesc()
+                .orElse(null);
     }
 }

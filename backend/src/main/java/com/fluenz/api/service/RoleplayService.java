@@ -76,38 +76,43 @@ public class RoleplayService {
                 """.formatted(situationTitle, situationDesc, chunksStr);
 
         String turnRule;
-        if (turnNumber == 1) {
+        if (turnNumber < 2) {
             turnRule = """
-                    THIS IS TURN 1 — You are responding to the user's answer.
+                    THIS IS AN INTERMEDIATE TURN — You are responding to the user.
                     
                     STRICT RULES FOR THIS TURN:
-                    - Acknowledge the user's answer naturally
+                    - Respond naturally to what the user just said
                     - Keep your response to MAX 2 short sentences
-                    - DO NOT ask another question
-                    - End your turn cleanly so the user can take initiative next
+                    - You CAN ask a brief follow-up question or make an encouraging statement to keep the conversation going
+                    - Do NOT evaluate or correct the user in this turn
                     """;
         } else {
             turnRule = """
-                    THIS IS THE FINAL TURN — You are answering the user's question and evaluating.
+                    THIS IS THE FINAL TURN — You are answering the user's last statement/question and evaluating.
                     
                     STRICT RULES FOR THIS TURN:
-                    1. First, answer the user's question naturally in 1-2 sentences in English.
-                    2. Then add a line break and write "---"
-                    3. Then provide an EVALUATION BLOCK entirely in Vietnamese:
+                    1. You MUST answer the user's LAST question first in 1-2 natural English sentences.
+                    2. Do NOT skip the answer.
+                    3. Do NOT start with feedback or evaluation.
+                    4. The first line of your response MUST be the English answer only.
+                    5. Then add a line break and write "---"
+                    6. Then provide an EVALUATION BLOCK entirely in Vietnamese:
                        - Did they use any Target Phrases? Which ones?
                        - Correct any grammar mistakes from their messages
                        - Give a brief, encouraging summary of their performance
-                       - Use emoji for friendliness
+                       - Do NOT use emoji
+                       - Keep the tone professional, supportive, and concise
+                    7. If you do not answer the user's last question before the separator, your response is invalid.
                     
                     Example format:
                     That sounds like a solid plan for next sprint.
                     
                     ---
                     
-                    📝 **Đánh giá:**
-                    ✅ Bạn đã sử dụng cụm "due to new requirements" rất tự nhiên!
-                    ⚠️ Lưu ý: "I working on" → nên là "I'm working on" / "I was working on"
-                    🎯 Tổng kết: Bạn đã giao tiếp tốt và sử dụng từ vựng đúng ngữ cảnh. Tiếp tục phát huy! 💪
+                    Danh gia:
+                    Ban da su dung cum "due to new requirements" kha tu nhien.
+                    Luu y: "I working on" nen doi thanh "I'm working on" hoac "I was working on".
+                    Tong ket: Ban giao tiep kha ro rang va da co gang dua cum tu da hoc vao dung ngu canh.
                     """;
         }
 

@@ -1,5 +1,6 @@
 package com.fluenz.api.dto.response;
 
+import com.fluenz.api.entity.enums.LearningMode;
 import com.fluenz.api.entity.enums.Level;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -17,6 +18,7 @@ public class LearningPathResponse {
     private UUID id;
     private String title;
     private String status;
+    private LearningMode learningMode;
     private String professionName;
     private Level userLevel;
     private int topicCount;

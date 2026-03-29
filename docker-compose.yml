@@ -43,6 +43,8 @@ services:
       OPENROUTER_MODEL: ${OPENROUTER_MODEL}
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL}
       UNSPLASH_ACCESS_KEY: ${UNSPLASH_ACCESS_KEY}
+    volumes:
+      - ./backend/uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy

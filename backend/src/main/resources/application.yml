@@ -20,6 +20,11 @@ spring:
 server:
   port: 8080
 
+app:
+  base-url: ${APP_BASE_URL:http://localhost:8080}
+  upload:
+    dir: ${APP_UPLOAD_DIR:uploads}
+
 # ---------- JWT ----------
 jwt:
   secret: ${JWT_SECRET:fluenz-default-secret-key-change-in-production-min-32-chars!!}
