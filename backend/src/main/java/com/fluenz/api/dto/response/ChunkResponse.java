@@ -1,5 +1,6 @@
 package com.fluenz.api.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -20,6 +21,7 @@ public class ChunkResponse {
     private String rootTranslation;
     private String rootIpa;
     private int orderIndex;
+    @JsonProperty("isCompleted")
     private boolean isCompleted;
     private List<SubPhraseResponse> subPhrases;
 }

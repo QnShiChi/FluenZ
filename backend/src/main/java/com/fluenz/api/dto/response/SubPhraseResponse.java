@@ -1,5 +1,6 @@
 package com.fluenz.api.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -20,6 +21,8 @@ public class SubPhraseResponse {
     private List<String> distractors;
     private String imageUrl;
     private int orderIndex;
+    @JsonProperty("isLearned")
     private boolean isLearned;
+    @JsonProperty("isBookmarked")
     private boolean isBookmarked;
 }

@@ -12,4 +12,5 @@ import java.util.UUID;
 public interface UserChunkProgressRepository extends JpaRepository<UserChunkProgress, UUID> {
     Optional<UserChunkProgress> findByUserIdAndChunkId(UUID userId, UUID chunkId);
     boolean existsByUserIdAndChunkId(UUID userId, UUID chunkId);
+    java.util.List<UserChunkProgress> findByUserId(UUID userId);
 }

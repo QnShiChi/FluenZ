@@ -26,18 +26,18 @@ public class ProgressService {
     private final UserDailyActivityRepository dailyActivityRepository;
     private final UserChunkProgressRepository chunkProgressRepository;
     private final UserDefaultChunkProgressRepository defaultChunkProgressRepository;
+    private final UserSubPhraseProgressRepository subPhraseProgressRepository;
+    private final UserDefaultSubPhraseProgressRepository defaultSubPhraseProgressRepository;
     private final ChunkRepository chunkRepository;
     private final DefaultChunkRepository defaultChunkRepository;
 
-    private static final int MINUTES_PER_CHUNK = 3;
+    private static final int MAX_SECONDS_PER_CHUNK = 10 * 60;
     private static final int DAILY_GOAL_MINUTES = 5;
 
     @Transactional
-    public ProgressDeltaResponse markChunkComplete(String email, UUID chunkId, boolean isDefault) {
+    public ProgressDeltaResponse markChunkComplete(String email, UUID chunkId, boolean isDefault, int totalTimeSeconds) {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("User not found"));
-
-        boolean isFirstTimeCompleted = false;
 
         if (isDefault) {
             DefaultChunk chunk = defaultChunkRepository.findById(chunkId)
@@ -51,13 +51,13 @@ public class ProgressService {
                         .user(user).defaultChunk(chunk).isCompleted(true)
                         .completedAt(LocalDateTime.now()).build();
                 defaultChunkProgressRepository.save(progress);
-                isFirstTimeCompleted = true;
             } else if (!Boolean.TRUE.equals(progress.getIsCompleted())) {
                 progress.setIsCompleted(true);
                 progress.setCompletedAt(LocalDateTime.now());
                 defaultChunkProgressRepository.save(progress);
-                isFirstTimeCompleted = true;
             }
+
+            markDefaultSubPhrasesLearned(user, chunk);
         } else {
             Chunk chunk = chunkRepository.findById(chunkId)
                     .orElseThrow(() -> new RuntimeException("Chunk not found"));
@@ -70,18 +70,65 @@ public class ProgressService {
                         .user(user).chunk(chunk).isCompleted(true)
                         .completedAt(LocalDateTime.now()).build();
                 chunkProgressRepository.save(progress);
-                isFirstTimeCompleted = true;
             } else if (!Boolean.TRUE.equals(progress.getIsCompleted())) {
                 progress.setIsCompleted(true);
                 progress.setCompletedAt(LocalDateTime.now());
                 chunkProgressRepository.save(progress);
-                isFirstTimeCompleted = true;
             }
+
+            markSubPhrasesLearned(user, chunk);
         }
 
-        int gainedMinutes = isFirstTimeCompleted ? MINUTES_PER_CHUNK : 0;
+        int gainedMinutes = calculateGainedMinutes(totalTimeSeconds);
 
         return updateDailyProgressAndStats(user, gainedMinutes);
+    }
+
+    static int calculateGainedMinutes(int totalTimeSeconds) {
+        if (totalTimeSeconds <= 0) {
+            return 0;
+        }
+
+        int cappedSeconds = Math.min(totalTimeSeconds, MAX_SECONDS_PER_CHUNK);
+        return (int) Math.ceil(cappedSeconds / 60.0);
+    }
+
+    private void markSubPhrasesLearned(User user, Chunk chunk) {
+        for (SubPhrase subPhrase : chunk.getSubPhrases()) {
+            UserSubPhraseProgress progress = subPhraseProgressRepository
+                    .findByUserIdAndSubPhraseId(user.getId(), subPhrase.getId())
+                    .orElseGet(() -> UserSubPhraseProgress.builder()
+                            .user(user)
+                            .subPhrase(subPhrase)
+                            .isLearned(false)
+                            .isBookmarked(false)
+                            .build());
+
+            if (!Boolean.TRUE.equals(progress.getIsLearned())) {
+                progress.setIsLearned(true);
+            }
+
+            subPhraseProgressRepository.save(progress);
+        }
+    }
+
+    private void markDefaultSubPhrasesLearned(User user, DefaultChunk chunk) {
+        for (DefaultSubPhrase subPhrase : chunk.getSubPhrases()) {
+            UserDefaultSubPhraseProgress progress = defaultSubPhraseProgressRepository
+                    .findByUserIdAndDefaultSubPhraseId(user.getId(), subPhrase.getId())
+                    .orElseGet(() -> UserDefaultSubPhraseProgress.builder()
+                            .user(user)
+                            .defaultSubPhrase(subPhrase)
+                            .isLearned(false)
+                            .isBookmarked(false)
+                            .build());
+
+            if (!Boolean.TRUE.equals(progress.getIsLearned())) {
+                progress.setIsLearned(true);
+            }
+
+            defaultSubPhraseProgressRepository.save(progress);
+        }
     }
 
     private ProgressDeltaResponse updateDailyProgressAndStats(User user, int gainedMinutes) {

@@ -1,5 +1,6 @@
 package com.fluenz.api.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Builder;
 import lombok.Data;
 import java.time.LocalDate;
@@ -18,6 +19,7 @@ public class UserProfileResponse {
     private int totalSpokenCount;
     
     private int todayMinutes;
+    @JsonProperty("isTodayGoalReached")
     private boolean isTodayGoalReached;
     
     private List<DailyActivityDto> weeklyActivities;

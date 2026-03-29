@@ -1,5 +1,6 @@
 package com.fluenz.api.controller;
 
+import com.fluenz.api.dto.request.ChunkCompleteRequest;
 import com.fluenz.api.entity.DefaultSubPhrase;
 import com.fluenz.api.entity.SubPhrase;
 import com.fluenz.api.entity.User;
@@ -37,9 +38,11 @@ public class ProgressController {
     public ResponseEntity<ProgressDeltaResponse> completeChunk(
             @PathVariable UUID chunkId,
             @RequestParam(defaultValue = "false") boolean isDefault,
+            @RequestBody(required = false) ChunkCompleteRequest request,
             Authentication authentication
     ) {
-        return ResponseEntity.ok(progressService.markChunkComplete(authentication.getName(), chunkId, isDefault));
+        int totalTimeSeconds = request != null ? request.getTotalTimeSeconds() : 0;
+        return ResponseEntity.ok(progressService.markChunkComplete(authentication.getName(), chunkId, isDefault, totalTimeSeconds));
     }
 
     @PostMapping("/voice-activity")

@@ -26,6 +26,7 @@ public class OnboardingService {
     private final ProfessionRepository professionRepository;
     private final LearningPathRepository learningPathRepository;
     private final UserSubPhraseProgressRepository progressRepository;
+    private final UserChunkProgressRepository chunkProgressRepository;
     private final LlmService llmService;
     private final ImageService imageService;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -139,7 +140,7 @@ public class OnboardingService {
         userRepository.save(user);
         LearningPath saved = learningPathRepository.save(path);
 
-        return mapToResponse(saved, null);
+        return mapToResponse(saved, null, null);
     }
 
     @Transactional(readOnly = true)
@@ -157,8 +158,12 @@ public class OnboardingService {
         Map<UUID, UserSubPhraseProgress> progressMap = new HashMap<>();
         progressRepository.findByUserId(user.getId())
                 .forEach(p -> progressMap.put(p.getSubPhrase().getId(), p));
+        Set<UUID> completedChunkIds = new HashSet<>();
+        chunkProgressRepository.findByUserId(user.getId()).stream()
+                .filter(p -> Boolean.TRUE.equals(p.getIsCompleted()))
+                .forEach(p -> completedChunkIds.add(p.getChunk().getId()));
 
-        return mapToResponse(path, progressMap);
+        return mapToResponse(path, progressMap, completedChunkIds);
     }
 
     public boolean hasActivePath(String email) {
@@ -169,9 +174,13 @@ public class OnboardingService {
 
     // --- Mappers ---
 
-    private LearningPathResponse mapToResponse(LearningPath path, Map<UUID, UserSubPhraseProgress> progressMap) {
+    private LearningPathResponse mapToResponse(
+            LearningPath path,
+            Map<UUID, UserSubPhraseProgress> progressMap,
+            Set<UUID> completedChunkIds
+    ) {
         List<TopicResponse> topicResponses = path.getTopics().stream()
-                .map(t -> mapTopicResponse(t, progressMap))
+                .map(t -> mapTopicResponse(t, progressMap, completedChunkIds))
                 .toList();
 
         int situationCount = topicResponses.stream().mapToInt(TopicResponse::getSituationCount).sum();
@@ -194,9 +203,13 @@ public class OnboardingService {
                 .build();
     }
 
-    private TopicResponse mapTopicResponse(Topic topic, Map<UUID, UserSubPhraseProgress> progressMap) {
+    private TopicResponse mapTopicResponse(
+            Topic topic,
+            Map<UUID, UserSubPhraseProgress> progressMap,
+            Set<UUID> completedChunkIds
+    ) {
         List<SituationResponse> situations = topic.getSituations().stream()
-                .map(s -> mapSituationResponse(s, progressMap))
+                .map(s -> mapSituationResponse(s, progressMap, completedChunkIds))
                 .toList();
 
         return TopicResponse.builder()
@@ -208,9 +221,13 @@ public class OnboardingService {
                 .build();
     }
 
-    private SituationResponse mapSituationResponse(Situation situation, Map<UUID, UserSubPhraseProgress> progressMap) {
+    private SituationResponse mapSituationResponse(
+            Situation situation,
+            Map<UUID, UserSubPhraseProgress> progressMap,
+            Set<UUID> completedChunkIds
+    ) {
         List<ChunkResponse> chunks = situation.getChunks().stream()
-                .map(c -> mapChunkResponse(c, progressMap))
+                .map(c -> mapChunkResponse(c, progressMap, completedChunkIds))
                 .toList();
 
         return SituationResponse.builder()
@@ -225,7 +242,11 @@ public class OnboardingService {
                 .build();
     }
 
-    private ChunkResponse mapChunkResponse(Chunk chunk, Map<UUID, UserSubPhraseProgress> progressMap) {
+    private ChunkResponse mapChunkResponse(
+            Chunk chunk,
+            Map<UUID, UserSubPhraseProgress> progressMap,
+            Set<UUID> completedChunkIds
+    ) {
         List<SubPhraseResponse> subPhrases = chunk.getSubPhrases().stream()
                 .map(sp -> {
                     boolean isLearned = false;
@@ -266,6 +287,7 @@ public class OnboardingService {
                 .rootTranslation(chunk.getRootTranslation())
                 .rootIpa(chunk.getRootIpa())
                 .orderIndex(chunk.getOrderIndex())
+                .isCompleted(completedChunkIds != null && completedChunkIds.contains(chunk.getId()))
                 .subPhrases(subPhrases)
                 .build();
     }
