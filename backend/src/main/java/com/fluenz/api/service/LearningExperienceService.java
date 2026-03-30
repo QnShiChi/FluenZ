@@ -60,7 +60,9 @@ public class LearningExperienceService {
 
         boolean onboardingRequired = false;
         if (learningMode == LearningMode.PERSONALIZED) {
-            boolean hasPersonalizedPath = !learningPathRepository.findByUserAndStatus(user, PathStatus.ACTIVE).isEmpty();
+            boolean hasPersonalizedPath =
+                    !learningPathRepository.findByUserAndStatus(user, PathStatus.ACTIVE).isEmpty()
+                    || !learningPathRepository.findByUserAndStatus(user, PathStatus.GENERATING).isEmpty();
             onboardingRequired = !hasPersonalizedPath;
         } else {
             DefaultCatalogVersion version = resolveAssignedDefaultVersion(user);

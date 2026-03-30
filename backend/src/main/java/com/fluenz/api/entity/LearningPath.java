@@ -28,8 +28,12 @@ public class LearningPath extends BaseEntity {
     private User user;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "profession_id", nullable = false)
+    @JoinColumn(name = "profession_id")
     private Profession profession;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "learner_profile_id")
+    private LearnerProfile learnerProfile;
 
     @OneToMany(mappedBy = "learningPath", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default

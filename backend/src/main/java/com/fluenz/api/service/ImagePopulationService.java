@@ -7,17 +7,16 @@ import com.fluenz.api.repository.LearningPathRepository;
 import com.fluenz.api.repository.SituationRepository;
 import com.fluenz.api.repository.SubPhraseRepository;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
 
 @Service
 @Slf4j
@@ -27,7 +26,6 @@ public class ImagePopulationService {
     private final SituationRepository situationRepository;
     private final SubPhraseRepository subPhraseRepository;
     private final ImageService imageService;
-    private final Executor imagePopulationExecutor;
     private final TransactionTemplate txTemplate;
     private final TransactionTemplate txReadOnly;
 
@@ -36,14 +34,12 @@ public class ImagePopulationService {
             SituationRepository situationRepository,
             SubPhraseRepository subPhraseRepository,
             ImageService imageService,
-            @Qualifier("imagePopulationExecutor") Executor imagePopulationExecutor,
             PlatformTransactionManager txManager
     ) {
         this.learningPathRepository = learningPathRepository;
         this.situationRepository = situationRepository;
         this.subPhraseRepository = subPhraseRepository;
         this.imageService = imageService;
-        this.imagePopulationExecutor = imagePopulationExecutor;
 
         this.txTemplate = new TransactionTemplate(txManager);
         this.txReadOnly = new TransactionTemplate(txManager);
@@ -73,14 +69,18 @@ public class ImagePopulationService {
 
                 path.getTopics().forEach(topic ->
                     topic.getSituations().forEach(situation -> {
-                        if (situation.getImageKeyword() != null && !situation.getImageKeyword().isBlank()) {
-                            collected.add(new ImageTask(situation.getId(), situation.getImageKeyword(), ImageTaskType.SITUATION));
+                        String situationKeyword = resolveSituationKeyword(situation);
+                        if ((situation.getThumbnailUrl() == null || situation.getThumbnailUrl().isBlank())
+                                && situationKeyword != null) {
+                            collected.add(new ImageTask(situation.getId(), situationKeyword, ImageTaskType.SITUATION));
                         }
 
                         situation.getChunks().forEach(chunk ->
                             chunk.getSubPhrases().forEach(subPhrase -> {
-                                if (subPhrase.getImageKeyword() != null && !subPhrase.getImageKeyword().isBlank()) {
-                                    collected.add(new ImageTask(subPhrase.getId(), subPhrase.getImageKeyword(), ImageTaskType.SUB_PHRASE));
+                                String subPhraseKeyword = resolveSubPhraseKeyword(subPhrase);
+                                if ((subPhrase.getImageUrl() == null || subPhrase.getImageUrl().isBlank())
+                                        && subPhraseKeyword != null) {
+                                    collected.add(new ImageTask(subPhrase.getId(), subPhraseKeyword, ImageTaskType.SUB_PHRASE));
                                 }
                             })
                         );
@@ -97,28 +97,27 @@ public class ImagePopulationService {
 
             log.info("Collected {} image tasks for path: {}", tasks.size(), learningPathId);
 
-            // Step 2: Fetch images in parallel (pure HTTP, no DB session needed)
-            List<CompletableFuture<Void>> futures = tasks.stream()
-                    .map(task -> CompletableFuture.runAsync(() -> {
-                        try {
-                            String imageUrl = imageService.fetchImageUrl(task.keyword);
-                            if (imageUrl != null) {
-                                task.resolvedUrl = imageUrl;
-                                log.info("Fetched image for {} '{}': {}", task.type, task.keyword, imageUrl.substring(0, Math.min(80, imageUrl.length())));
-                            } else {
-                                log.warn("No image found for {} '{}'", task.type, task.keyword);
-                            }
-                        } catch (Exception e) {
-                            log.warn("Error fetching image for '{}': {}", task.keyword, e.getMessage());
-                        }
-                    }, imagePopulationExecutor))
-                    .toList();
-
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-
-            // Step 3: Save resolved URLs back to DB in transactions
+            // Step 2: Fetch images sequentially per unique keyword and persist each resolved image immediately.
+            // This job already runs asynchronously; avoiding nested submits prevents executor starvation.
+            Map<String, String> resolvedByKeyword = new LinkedHashMap<>();
             int saved = 0;
             for (ImageTask task : tasks) {
+                String normalizedKeyword = normalizeKeyword(task.keyword);
+                if (!resolvedByKeyword.containsKey(normalizedKeyword)) {
+                    try {
+                        String imageUrl = imageService.fetchImageUrl(task.keyword);
+                        resolvedByKeyword.put(normalizedKeyword, imageUrl);
+                        if (imageUrl != null) {
+                            log.info("Fetched image for {} '{}': {}", task.type, task.keyword, imageUrl.substring(0, Math.min(80, imageUrl.length())));
+                        } else {
+                            log.warn("No image found for {} '{}'", task.type, task.keyword);
+                        }
+                    } catch (Exception e) {
+                        resolvedByKeyword.put(normalizedKeyword, null);
+                        log.warn("Error fetching image for '{}': {}", task.keyword, e.getMessage());
+                    }
+                }
+                task.resolvedUrl = resolvedByKeyword.get(normalizedKeyword);
                 if (task.resolvedUrl != null) {
                     try {
                         txTemplate.executeWithoutResult(status -> {
@@ -154,6 +153,37 @@ public class ImagePopulationService {
     // --- Inner types ---
 
     enum ImageTaskType { SITUATION, SUB_PHRASE }
+
+    private String resolveSituationKeyword(Situation situation) {
+        if (situation.getImageKeyword() != null && !situation.getImageKeyword().isBlank()) {
+            return situation.getImageKeyword().trim();
+        }
+        return situation.getChunks().stream()
+                .map(chunk -> {
+                    if (chunk.getContextQuestion() != null && !chunk.getContextQuestion().isBlank()) {
+                        return chunk.getContextQuestion().trim();
+                    }
+                    return chunk.getRootSentence();
+                })
+                .filter(keyword -> keyword != null && !keyword.isBlank())
+                .findFirst()
+                .map(String::trim)
+                .orElse(null);
+    }
+
+    private String resolveSubPhraseKeyword(SubPhrase subPhrase) {
+        if (subPhrase.getImageKeyword() != null && !subPhrase.getImageKeyword().isBlank()) {
+            return subPhrase.getImageKeyword().trim();
+        }
+        if (subPhrase.getText() != null && !subPhrase.getText().isBlank()) {
+            return subPhrase.getText().trim();
+        }
+        return null;
+    }
+
+    private String normalizeKeyword(String keyword) {
+        return keyword == null ? "" : keyword.trim().toLowerCase();
+    }
 
     static class ImageTask {
         final UUID entityId;

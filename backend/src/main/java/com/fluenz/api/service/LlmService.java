@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -42,6 +43,21 @@ public class LlmService {
     @Data
     public static class LlmLearningPath {
         private List<LlmTopic> topics;
+    }
+
+    @Data
+    public static class LlmBlueprint {
+        private String personaSummary;
+        private List<String> communicationPriorities;
+        private List<LlmBlueprintTopic> topics;
+    }
+
+    @Data
+    public static class LlmBlueprintTopic {
+        private String name;
+        private String description;
+        private String level;
+        private String imageKeyword;
     }
 
     @Data
@@ -92,23 +108,62 @@ public class LlmService {
             List<String> contexts,
             String goals
     ) {
-        String prompt = buildPrompt(profession, level, contexts, goals);
+        String prompt = buildLegacyPrompt(profession, level, contexts, goals);
+        return executeLearningPath(prompt, 8192, "Failed to generate learning path after 3 attempts");
+    }
+
+    public LlmBlueprint generateBlueprint(
+            String profession,
+            String level,
+            List<String> contexts,
+            String goals,
+            String personaSummary
+    ) {
+        String prompt = buildBlueprintPrompt(profession, level, contexts, goals, personaSummary);
 
         for (int attempt = 0; attempt < 3; attempt++) {
             try {
-                String response = callOpenRouter(prompt);
-                return parseResponse(response);
+                String response = callOpenRouter(prompt, 8192);
+                return parseBlueprintResponse(response);
             } catch (Exception e) {
-                log.warn("LLM attempt {} failed: {}", attempt + 1, e.getMessage());
+                log.warn("Blueprint attempt {} failed: {}", attempt + 1, e.getMessage());
                 if (attempt == 2) {
-                    throw new RuntimeException("Failed to generate learning path after 3 attempts", e);
+                    throw new RuntimeException("Failed to generate learning blueprint after 3 attempts", e);
+                }
+            }
+        }
+
+        throw new RuntimeException("Unreachable");
+    }
+
+    public LlmLearningPath generateTopicBatch(
+            String profession,
+            String level,
+            List<String> contexts,
+            String goals,
+            String personaSummary,
+            List<LlmBlueprintTopic> batchTopics
+    ) {
+        String prompt = buildTopicBatchPrompt(profession, level, contexts, goals, personaSummary, batchTopics);
+        return executeLearningPath(prompt, 12288, "Failed to generate topic batch after 3 attempts");
+    }
+
+    private LlmLearningPath executeLearningPath(String prompt, int maxTokens, String failureMessage) {
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                String response = callOpenRouter(prompt, maxTokens);
+                return parseLearningPathResponse(response);
+            } catch (Exception e) {
+                log.warn("Learning-path attempt {} failed: {}", attempt + 1, e.getMessage());
+                if (attempt == 2) {
+                    throw new RuntimeException(failureMessage, e);
                 }
             }
         }
         throw new RuntimeException("Unreachable");
     }
 
-    private String buildPrompt(String profession, String level, List<String> contexts, String goals) {
+    private String buildLegacyPrompt(String profession, String level, List<String> contexts, String goals) {
         String contextStr = contexts != null && !contexts.isEmpty()
                 ? String.join(", ", contexts)
                 : "general professional communication";
@@ -145,7 +200,7 @@ public class LlmService {
                 3. Situation level: BEGINNER, INTERMEDIATE, or ADVANCED
                 4. Each situation.imageKeyword is a 2-4 word English phrase suitable for stock photo search that represents the situation's context (e.g., "office introduction handshake", "email writing laptop")
                 5. contextQuestion must be a natural English question
-                6. rootSentence must contain "___" where variable chunks slot in
+                6. rootSentence must contain EXACTLY ONE "___" blank where all variable chunks slot in
                 7. Each variableChunk.text is a short English phrase (2-6 words)
                 8. Each variableChunk.translation is the Vietnamese meaning of variableChunk.text
                 9. Each variableChunk.distractors has exactly 2 wrong but plausible alternatives
@@ -153,6 +208,7 @@ public class LlmService {
                 11. IPA must be accurate International Phonetic Alphabet transcription
                 12. Each variableChunk.imageKeyword is a 2-4 word English phrase suitable for stock photo search (e.g., "team meeting whiteboard", "user feedback laptop")
                 13. CRITICAL: You MUST generate EXACTLY 3 variableChunks for each chunk. Not 2, not 4 — exactly 3.
+                14. CRITICAL: All 3 variableChunks must be interchangeable alternatives for the SAME single blank in rootSentence. Do not create multiple blanks or multi-slot templates.
                 
                 Example chunk:
                 {
@@ -201,7 +257,139 @@ public class LlmService {
                 """.formatted(profession, level, contextStr, goalsStr);
     }
 
-    private String callOpenRouter(String prompt) {
+    private String buildBlueprintPrompt(String profession, String level, List<String> contexts, String goals, String personaSummary) {
+        String contextStr = contexts != null && !contexts.isEmpty()
+                ? String.join(", ", contexts)
+                : "general professional communication";
+        String goalsStr = goals != null && !goals.isEmpty()
+                ? goals
+                : "improve professional English communication";
+        String personaSeed = personaSummary != null && !personaSummary.isBlank()
+                ? personaSummary
+                : "Create a grounded learner persona before generating the roadmap.";
+
+        return """
+                You are designing a deep English communication roadmap for a Vietnamese learner.
+                
+                Learner profile:
+                - Role context: %s
+                - Current level: %s
+                - Communication contexts: %s
+                - Goals: %s
+                - Persona seed: %s
+                
+                Produce ONLY valid JSON with:
+                - personaSummary: 3-4 sentences about the learner
+                - communicationPriorities: 3-5 concise priorities
+                - topics: 20 topic roadmap entries ordered from foundational to advanced
+                
+                Topic rules:
+                1. Topic names and descriptions should be in Vietnamese.
+                2. Each topic must include level: BEGINNER, INTERMEDIATE, or ADVANCED.
+                3. Each topic must include imageKeyword: a 2-4 word English stock-photo phrase.
+                4. Topics should progress in difficulty and stay tightly connected to the learner profile.
+                
+                JSON shape:
+                {
+                  "personaSummary": "string",
+                  "communicationPriorities": ["priority 1", "priority 2"],
+                  "topics": [
+                    {
+                      "name": "Topic in Vietnamese",
+                      "description": "Why this topic matters in Vietnamese",
+                      "level": "BEGINNER",
+                      "imageKeyword": "meeting room laptop"
+                    }
+                  ]
+                }
+                """.formatted(profession, level, contextStr, goalsStr, personaSeed);
+    }
+
+    private String buildTopicBatchPrompt(
+            String profession,
+            String level,
+            List<String> contexts,
+            String goals,
+            String personaSummary,
+            List<LlmBlueprintTopic> batchTopics
+    ) {
+        String contextStr = contexts != null && !contexts.isEmpty()
+                ? String.join(", ", contexts)
+                : "general professional communication";
+        String goalsStr = goals != null && !goals.isEmpty()
+                ? goals
+                : "improve professional English communication";
+
+        String topicOutline = batchTopics.stream()
+                .map(topic -> "- " + topic.getName()
+                        + " | " + topic.getDescription()
+                        + " | level=" + topic.getLevel()
+                        + " | imageKeyword=" + topic.getImageKeyword())
+                .reduce((left, right) -> left + "\n" + right)
+                .orElse("- General topic");
+
+        return """
+                You are generating detailed English-learning content for a Vietnamese learner.
+                
+                Learner profile:
+                - Role context: %s
+                - Current level: %s
+                - Communication contexts: %s
+                - Goals: %s
+                - Persona summary: %s
+                
+                Generate detailed learning content ONLY for these topic outlines:
+                %s
+                
+                Output ONLY valid JSON:
+                {
+                  "topics": [
+                    {
+                      "name": "Topic in Vietnamese",
+                      "situations": [
+                        {
+                          "title": "Situation in Vietnamese",
+                          "description": "Context in Vietnamese",
+                          "level": "BEGINNER",
+                          "imageKeyword": "stock photo keyword",
+                          "chunks": [
+                            {
+                              "contextQuestion": "English question",
+                              "contextTranslation": "Vietnamese translation",
+                              "rootSentence": "Pattern with ___.",
+                              "rootTranslation": "Vietnamese translation",
+                              "rootIpa": "/IPA/",
+                              "rootDistractors": ["wrong root 1", "wrong root 2"],
+                              "variableChunks": [
+                                {
+                                  "text": "chunk text",
+                                  "translation": "Vietnamese meaning",
+                                  "ipa": "/IPA/",
+                                  "distractors": ["wrong 1", "wrong 2"],
+                                  "imageKeyword": "search keyword"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+                
+                Rules:
+                1. Keep topics in the same order and with the same names as the outlines.
+                2. Each topic should have 2-3 situations.
+                3. Each situation should have 3-5 chunks.
+                4. Every chunk must have EXACTLY 3 variableChunks.
+                5. Situations and descriptions should stay realistic to the learner profile.
+                6. Topic names, situation titles, and descriptions must be in Vietnamese.
+                7. Every rootSentence must contain EXACTLY ONE "___" blank.
+                8. All 3 variableChunks in a chunk must fit that same single blank as interchangeable options.
+                """.formatted(profession, level, contextStr, goalsStr, personaSummary, topicOutline);
+    }
+
+    private String callOpenRouter(String prompt, int maxTokens) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setBearerAuth(apiKey);
@@ -214,7 +402,7 @@ public class LlmService {
                         Map.of("role", "user", "content", prompt)
                 ),
                 "temperature", 0.7,
-                "max_tokens", 8192
+                "max_tokens", maxTokens
         );
 
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
@@ -241,7 +429,17 @@ public class LlmService {
         return (String) message.get("content");
     }
 
-    private LlmLearningPath parseResponse(String content) throws JsonProcessingException {
+    private LlmLearningPath parseLearningPathResponse(String content) throws JsonProcessingException {
+        LlmLearningPath learningPath = objectMapper.readValue(stripMarkdownFences(content), LlmLearningPath.class);
+        validateLearningPathResponse(learningPath);
+        return learningPath;
+    }
+
+    private LlmBlueprint parseBlueprintResponse(String content) throws JsonProcessingException {
+        return objectMapper.readValue(stripMarkdownFences(content), LlmBlueprint.class);
+    }
+
+    private String stripMarkdownFences(String content) {
         // Strip markdown code fences if present
         String json = content.trim();
         if (json.startsWith("```json")) {
@@ -253,7 +451,182 @@ public class LlmService {
             json = json.substring(0, json.length() - 3);
         }
         json = json.trim();
+        return json;
+    }
 
-        return objectMapper.readValue(json, LlmLearningPath.class);
+    private void validateLearningPathResponse(LlmLearningPath learningPath) {
+        if (learningPath == null || learningPath.getTopics() == null || learningPath.getTopics().isEmpty()) {
+            throw new RuntimeException("Learning path response contained no topics");
+        }
+
+        for (LlmTopic topic : learningPath.getTopics()) {
+            if (topic.getSituations() == null || topic.getSituations().isEmpty()) {
+                throw new RuntimeException("Topic '" + safeLabel(topic.getName()) + "' contained no situations");
+            }
+
+            for (LlmSituation situation : topic.getSituations()) {
+                if (isBlank(situation.getImageKeyword())) {
+                    situation.setImageKeyword(deriveSituationKeyword(situation));
+                }
+
+                if (situation.getChunks() == null || situation.getChunks().isEmpty()) {
+                    throw new RuntimeException("Situation '" + safeLabel(situation.getTitle()) + "' contained no chunks");
+                }
+
+                for (LlmChunk chunk : situation.getChunks()) {
+                    chunk.setRootSentence(normalizeBlankToken(chunk.getRootSentence()));
+                    chunk.setRootTranslation(normalizeBlankToken(chunk.getRootTranslation()));
+                    chunk.setContextQuestion(trimToNull(chunk.getContextQuestion()));
+                    chunk.setContextTranslation(trimToNull(chunk.getContextTranslation()));
+                    chunk.setRootIpa(trimToNull(chunk.getRootIpa()));
+
+                    int blankCount = countBlankSlots(chunk.getRootSentence());
+                    if (blankCount != 1) {
+                        throw new RuntimeException("Chunk rootSentence must contain exactly one blank, but got "
+                                + blankCount + " in '" + safeLabel(chunk.getRootSentence()) + "'");
+                    }
+
+                    if (chunk.getVariableChunks() == null || chunk.getVariableChunks().size() != 3) {
+                        throw new RuntimeException("Chunk must contain exactly 3 variableChunks");
+                    }
+
+                    List<LlmVariableChunk> cleanedChunks = new ArrayList<>();
+                    for (LlmVariableChunk variableChunk : chunk.getVariableChunks()) {
+                        if (isBlank(variableChunk.getText())) {
+                            throw new RuntimeException("Variable chunk text was blank");
+                        }
+
+                        variableChunk.setText(variableChunk.getText().trim());
+                        variableChunk.setTranslation(trimToNull(variableChunk.getTranslation()));
+                        variableChunk.setIpa(trimToNull(variableChunk.getIpa()));
+
+                        variableChunk.setDistractors(sanitizeDistractors(
+                                variableChunk.getText(),
+                                variableChunk.getDistractors()
+                        ));
+
+                        if (isBlank(variableChunk.getImageKeyword())) {
+                            variableChunk.setImageKeyword(variableChunk.getText());
+                        } else {
+                            variableChunk.setImageKeyword(variableChunk.getImageKeyword().trim());
+                        }
+
+                        cleanedChunks.add(variableChunk);
+                    }
+                    chunk.setVariableChunks(cleanedChunks);
+                }
+            }
+        }
+    }
+
+    private String deriveSituationKeyword(LlmSituation situation) {
+        if (!isBlank(situation.getImageKeyword())) {
+            return situation.getImageKeyword().trim();
+        }
+        if (situation.getChunks() != null) {
+            for (LlmChunk chunk : situation.getChunks()) {
+                if (!isBlank(chunk.getContextQuestion())) {
+                    return chunk.getContextQuestion().trim();
+                }
+                if (!isBlank(chunk.getRootSentence())) {
+                    return chunk.getRootSentence().replace("___", "").trim();
+                }
+            }
+        }
+        return trimToNull(situation.getTitle());
+    }
+
+    private String normalizeBlankToken(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value
+                .replaceAll("_{2,}", "___")
+                .replaceAll("\\s*___\\s*", " ___ ")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private int countBlankSlots(String value) {
+        if (isBlank(value)) {
+            return 0;
+        }
+        int count = 0;
+        int index = 0;
+        while ((index = value.indexOf("___", index)) >= 0) {
+            count++;
+            index += 3;
+        }
+        return count;
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isBlank() ? null : trimmed;
+    }
+
+    private String safeLabel(String value) {
+        return value == null ? "(blank)" : value;
+    }
+
+    private List<String> sanitizeDistractors(String correctText, List<String> distractors) {
+        List<String> cleaned = new ArrayList<>();
+        if (distractors != null) {
+            for (String distractor : distractors) {
+                String normalized = trimToNull(distractor);
+                if (normalized == null || normalized.equalsIgnoreCase(correctText) || cleaned.contains(normalized)) {
+                    continue;
+                }
+                cleaned.add(normalized);
+                if (cleaned.size() == 2) {
+                    break;
+                }
+            }
+        }
+
+        List<String> fallbacks = buildFallbackDistractors(correctText);
+        for (String fallback : fallbacks) {
+            if (!cleaned.contains(fallback) && !fallback.equalsIgnoreCase(correctText)) {
+                cleaned.add(fallback);
+            }
+            if (cleaned.size() == 2) {
+                break;
+            }
+        }
+
+        if (cleaned.size() < 2) {
+            cleaned.add("general option");
+        }
+        if (cleaned.size() < 2) {
+            cleaned.add("another choice");
+        }
+
+        return cleaned.subList(0, 2);
+    }
+
+    private List<String> buildFallbackDistractors(String correctText) {
+        String normalized = correctText == null ? "" : correctText.trim();
+        if (normalized.isBlank()) {
+            return List.of("general option", "another choice");
+        }
+
+        List<String> fallbacks = new ArrayList<>();
+        if (normalized.contains(" ")) {
+            fallbacks.add("different " + normalized.substring(normalized.indexOf(' ') + 1));
+            fallbacks.add("another " + normalized.substring(normalized.indexOf(' ') + 1));
+        } else {
+            fallbacks.add(normalized + " option");
+            fallbacks.add("basic " + normalized);
+        }
+        fallbacks.add("general option");
+        fallbacks.add("another choice");
+        return fallbacks;
     }
 }

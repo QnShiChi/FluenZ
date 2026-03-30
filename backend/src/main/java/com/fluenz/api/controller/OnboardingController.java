@@ -1,7 +1,9 @@
 package com.fluenz.api.controller;
 
 import com.fluenz.api.dto.request.OnboardingRequest;
+import com.fluenz.api.dto.response.GenerationProgressResponse;
 import com.fluenz.api.dto.response.LearningPathResponse;
+import com.fluenz.api.dto.response.PersonaPreviewResponse;
 import com.fluenz.api.service.ImagePopulationService;
 import com.fluenz.api.service.OnboardingService;
 import jakarta.validation.Valid;
@@ -23,20 +25,40 @@ public class OnboardingController {
     private final ImagePopulationService imagePopulationService;
 
     @PostMapping("/generate")
-    public ResponseEntity<LearningPathResponse> generate(
+    public ResponseEntity<GenerationProgressResponse> generate(
             @Valid @RequestBody OnboardingRequest request,
             Authentication authentication
     ) {
-        LearningPathResponse response = onboardingService.generatePath(
+        GenerationProgressResponse response = onboardingService.startGeneration(
                 authentication.getName(), request
         );
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
+    }
+
+    @PostMapping("/persona-preview")
+    public ResponseEntity<PersonaPreviewResponse> previewPersona(
+            @Valid @RequestBody OnboardingRequest request
+    ) {
+        return ResponseEntity.ok(onboardingService.previewPersona(request));
     }
 
     @GetMapping("/status")
-    public ResponseEntity<Map<String, Boolean>> hasPath(Authentication authentication) {
+    public ResponseEntity<Map<String, Object>> hasPath(Authentication authentication) {
         boolean hasPath = onboardingService.hasActivePath(authentication.getName());
-        return ResponseEntity.ok(Map.of("hasActivePath", hasPath));
+        java.util.UUID generatingPathId = onboardingService.getLatestGeneratingPathId(authentication.getName()).orElse(null);
+        java.util.Map<String, Object> response = new java.util.HashMap<>();
+        response.put("hasActivePath", hasPath);
+        response.put("generationInProgress", generatingPathId != null);
+        response.put("generationPathId", generatingPathId);
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/generation-progress/{pathId}")
+    public ResponseEntity<GenerationProgressResponse> getGenerationProgress(
+            @PathVariable UUID pathId,
+            Authentication authentication
+    ) {
+        return ResponseEntity.ok(onboardingService.getGenerationProgress(authentication.getName(), pathId));
     }
 
     @PostMapping("/populate-images/{pathId}")
