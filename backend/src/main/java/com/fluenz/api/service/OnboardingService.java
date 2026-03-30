@@ -14,6 +14,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import java.util.*;
 import java.util.stream.IntStream;
 
@@ -28,7 +30,7 @@ public class OnboardingService {
     private final UserSubPhraseProgressRepository progressRepository;
     private final UserChunkProgressRepository chunkProgressRepository;
     private final LlmService llmService;
-    private final ImageService imageService;
+    private final ImagePopulationService imagePopulationService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Transactional
@@ -78,6 +80,7 @@ public class OnboardingService {
                                         .title(ls.getTitle())
                                         .description(ls.getDescription())
                                         .level(parseLevel(ls.getLevel()))
+                                        .imageKeyword(ls.getImageKeyword())
                                         .orderIndex(si)
                                         .topic(topic)
                                         .build();
@@ -107,16 +110,12 @@ public class OnboardingService {
                                                             } catch (JsonProcessingException e) {
                                                                 log.warn("Failed to serialize distractors", e);
                                                             }
-                                                            String imageUrl = null;
-                                                            if (vc.getImageKeyword() != null && !vc.getImageKeyword().isBlank()) {
-                                                                imageUrl = imageService.fetchImageUrl(vc.getImageKeyword());
-                                                            }
                                                             return SubPhrase.builder()
                                                                     .text(vc.getText())
                                                                     .translation(vc.getTranslation())
                                                                     .ipa(vc.getIpa())
                                                                     .distractors(distractorsJson)
-                                                                    .imageUrl(imageUrl)
+                                                                    .imageKeyword(vc.getImageKeyword())
                                                                     .orderIndex(spi)
                                                                     .chunk(chunk)
                                                                     .build();
@@ -139,6 +138,15 @@ public class OnboardingService {
         user.setPreferredLearningMode(LearningMode.PERSONALIZED);
         userRepository.save(user);
         LearningPath saved = learningPathRepository.save(path);
+
+        // Trigger async image population AFTER transaction commits
+        UUID savedPathId = saved.getId();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                imagePopulationService.populateImagesAsync(savedPathId);
+            }
+        });
 
         return mapToResponse(saved, null, null);
     }

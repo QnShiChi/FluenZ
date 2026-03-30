@@ -25,6 +25,9 @@ public class Situation extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private String thumbnailUrl;
 
+    @Column(columnDefinition = "TEXT")
+    private String imageKeyword;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Level level;

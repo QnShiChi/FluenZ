@@ -41,3 +41,13 @@ openrouter:
 unsplash:
   access:
     key: ${UNSPLASH_ACCESS_KEY:}
+
+# ---------- Pexels (Stock Images) ----------
+pexels:
+  access:
+    key: ${PEXELS_ACCESS_KEY:}
+
+# ---------- Pixabay (Stock Images) ----------
+pixabay:
+  access:
+    key: ${PIXABAY_ACCESS_KEY:}

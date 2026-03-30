@@ -55,6 +55,7 @@ public class LlmService {
         private String title;
         private String description;
         private String level;
+        private String imageKeyword;
         private List<LlmChunk> chunks;
     }
 
@@ -142,15 +143,16 @@ public class LlmService {
                 1. Topic names in Vietnamese
                 2. Situation titles in Vietnamese, descriptions as context-setting in Vietnamese
                 3. Situation level: BEGINNER, INTERMEDIATE, or ADVANCED
-                4. contextQuestion must be a natural English question
-                5. rootSentence must contain "___" where variable chunks slot in
-                6. Each variableChunk.text is a short English phrase (2-6 words)
-                7. Each variableChunk.translation is the Vietnamese meaning of variableChunk.text
-                8. Each variableChunk.distractors has exactly 2 wrong but plausible alternatives
-                9. rootDistractors has exactly 2 wrong but plausible alternatives for the root sentence
-                10. IPA must be accurate International Phonetic Alphabet transcription
-                11. Each variableChunk.imageKeyword is a 2-4 word English phrase suitable for stock photo search (e.g., "team meeting whiteboard", "user feedback laptop")
-                12. CRITICAL: You MUST generate EXACTLY 3 variableChunks for each chunk. Not 2, not 4 — exactly 3.
+                4. Each situation.imageKeyword is a 2-4 word English phrase suitable for stock photo search that represents the situation's context (e.g., "office introduction handshake", "email writing laptop")
+                5. contextQuestion must be a natural English question
+                6. rootSentence must contain "___" where variable chunks slot in
+                7. Each variableChunk.text is a short English phrase (2-6 words)
+                8. Each variableChunk.translation is the Vietnamese meaning of variableChunk.text
+                9. Each variableChunk.distractors has exactly 2 wrong but plausible alternatives
+                10. rootDistractors has exactly 2 wrong but plausible alternatives for the root sentence
+                11. IPA must be accurate International Phonetic Alphabet transcription
+                12. Each variableChunk.imageKeyword is a 2-4 word English phrase suitable for stock photo search (e.g., "team meeting whiteboard", "user feedback laptop")
+                13. CRITICAL: You MUST generate EXACTLY 3 variableChunks for each chunk. Not 2, not 4 — exactly 3.
                 
                 Example chunk:
                 {
@@ -177,6 +179,7 @@ public class LlmService {
                           "title": "Situation in Vietnamese",
                           "description": "Context in Vietnamese",
                           "level": "BEGINNER",
+                          "imageKeyword": "situation stock photo keyword",
                           "chunks": [
                             {
                               "contextQuestion": "English question",

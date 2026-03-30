@@ -2,6 +2,7 @@ package com.fluenz.api.controller;
 
 import com.fluenz.api.dto.request.OnboardingRequest;
 import com.fluenz.api.dto.response.LearningPathResponse;
+import com.fluenz.api.service.ImagePopulationService;
 import com.fluenz.api.service.OnboardingService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -11,6 +12,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/onboarding")
@@ -18,6 +20,7 @@ import java.util.Map;
 public class OnboardingController {
 
     private final OnboardingService onboardingService;
+    private final ImagePopulationService imagePopulationService;
 
     @PostMapping("/generate")
     public ResponseEntity<LearningPathResponse> generate(
@@ -34,5 +37,11 @@ public class OnboardingController {
     public ResponseEntity<Map<String, Boolean>> hasPath(Authentication authentication) {
         boolean hasPath = onboardingService.hasActivePath(authentication.getName());
         return ResponseEntity.ok(Map.of("hasActivePath", hasPath));
+    }
+
+    @PostMapping("/populate-images/{pathId}")
+    public ResponseEntity<Map<String, String>> populateImages(@PathVariable UUID pathId) {
+        imagePopulationService.populateImagesAsync(pathId);
+        return ResponseEntity.ok(Map.of("status", "Image population triggered for path: " + pathId));
     }
 }

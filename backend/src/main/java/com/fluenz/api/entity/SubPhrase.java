@@ -27,6 +27,9 @@ public class SubPhrase extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private String imageUrl;
 
+    @Column(columnDefinition = "TEXT")
+    private String imageKeyword;
+
     @Column(nullable = false)
     private Integer orderIndex;
 
