@@ -28,6 +28,28 @@ public class Situation extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private String imageKeyword;
 
+    @Column(columnDefinition = "TEXT")
+    private String thumbnailQuery;
+
+    @Column(columnDefinition = "TEXT")
+    private String fallbackQuery;
+
+    @Column(length = 64)
+    private String thumbnailSource;
+
+    @Column(columnDefinition = "TEXT")
+    private String imageFingerprint;
+
+    @Builder.Default
+    @Column
+    private Integer assetRetryCount = 0;
+
+    @Column(length = 64)
+    private String generationStatus;
+
+    @Column(length = 64)
+    private String contentValidationStatus;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Level level;

@@ -14,6 +14,7 @@ import org.springframework.web.client.RestTemplate;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Service
@@ -380,12 +381,17 @@ public class LlmService {
                 Rules:
                 1. Keep topics in the same order and with the same names as the outlines.
                 2. Each topic should have 2-3 situations.
-                3. Each situation should have 3-5 chunks.
+                3. CRITICAL: Each situation must have EXACTLY 5 chunks.
                 4. Every chunk must have EXACTLY 3 variableChunks.
                 5. Situations and descriptions should stay realistic to the learner profile.
                 6. Topic names, situation titles, and descriptions must be in Vietnamese.
                 7. Every rootSentence must contain EXACTLY ONE "___" blank.
                 8. All 3 variableChunks in a chunk must fit that same single blank as interchangeable options.
+                9. Each variableChunk.text must be a usable English phrase, usually 2-6 words, not a single isolated word.
+                10. The 3 variableChunks in a chunk should feel complementary and useful for building the full sentence.
+                11. Never output single-word variableChunks such as "meeting", "email", "plan", "team", or "client".
+                12. Prefer reusable phrases like "in tomorrow's meeting", "with the client team", "for the next release", "before the deadline".
+                13. Keep each variableChunk concise, natural, and directly usable in workplace communication.
                 """.formatted(profession, level, contextStr, goalsStr, personaSummary, topicOutline);
     }
 
@@ -472,6 +478,12 @@ public class LlmService {
                 if (situation.getChunks() == null || situation.getChunks().isEmpty()) {
                     throw new RuntimeException("Situation '" + safeLabel(situation.getTitle()) + "' contained no chunks");
                 }
+                if (situation.getChunks().size() < 5) {
+                    throw new RuntimeException("Situation '" + safeLabel(situation.getTitle()) + "' must contain exactly 5 chunks");
+                }
+                if (situation.getChunks().size() > 5) {
+                    situation.setChunks(new ArrayList<>(situation.getChunks().subList(0, 5)));
+                }
 
                 for (LlmChunk chunk : situation.getChunks()) {
                     chunk.setRootSentence(normalizeBlankToken(chunk.getRootSentence()));
@@ -496,7 +508,7 @@ public class LlmService {
                             throw new RuntimeException("Variable chunk text was blank");
                         }
 
-                        variableChunk.setText(variableChunk.getText().trim());
+                        variableChunk.setText(normalizeVariableChunkText(variableChunk.getText(), chunk));
                         variableChunk.setTranslation(trimToNull(variableChunk.getTranslation()));
                         variableChunk.setIpa(trimToNull(variableChunk.getIpa()));
 
@@ -628,5 +640,56 @@ public class LlmService {
         fallbacks.add("general option");
         fallbacks.add("another choice");
         return fallbacks;
+    }
+
+    private int countWords(String value) {
+        String normalized = trimToNull(value);
+        if (normalized == null) {
+            return 0;
+        }
+
+        return (int) java.util.Arrays.stream(normalized.split("\\s+"))
+                .map(token -> token.replaceAll("^[^A-Za-z0-9]+|[^A-Za-z0-9]+$", ""))
+                .filter(token -> !token.isBlank())
+                .count();
+    }
+
+    private String normalizeVariableChunkText(String rawText, LlmChunk chunk) {
+        String normalized = trimToNull(rawText);
+        if (normalized == null) {
+            throw new RuntimeException("Variable chunk text was blank");
+        }
+
+        if (countWords(normalized) >= 2) {
+            return normalized;
+        }
+
+        String repaired = repairSingleWordChunk(normalized, chunk);
+        log.warn("Repaired single-word variable chunk '{}' -> '{}'", normalized, repaired);
+        return repaired;
+    }
+
+    private String repairSingleWordChunk(String rawWord, LlmChunk chunk) {
+        String word = rawWord.trim();
+        String lowerWord = word.toLowerCase(Locale.ROOT);
+        String rootSentence = chunk != null ? trimToNull(chunk.getRootSentence()) : null;
+        String contextQuestion = chunk != null ? trimToNull(chunk.getContextQuestion()) : null;
+        String cue = ((rootSentence == null ? "" : rootSentence) + " " + (contextQuestion == null ? "" : contextQuestion))
+                .toLowerCase(Locale.ROOT);
+
+        if (cue.contains("with") || cue.contains("work with") || cue.contains("coordinate") || cue.contains("collaborate")) {
+            return "with " + lowerWord;
+        }
+        if (cue.contains("about") || cue.contains("discuss") || cue.contains("talk")) {
+            return "about " + lowerWord;
+        }
+        if (cue.contains("for") || cue.contains("plan") || cue.contains("prepare") || cue.contains("deadline")) {
+            return "for " + lowerWord;
+        }
+        if (cue.contains("in") || cue.contains("meeting") || cue.contains("call") || cue.contains("interview")) {
+            return "in the " + lowerWord;
+        }
+
+        return "about " + lowerWord;
     }
 }

@@ -21,6 +21,8 @@ public class GenerationProgressResponse {
     private int totalTopics;
     private String currentTopicName;
     private int progressPercent;
+    private boolean textReady;
+    private boolean assetsPending;
     private boolean complete;
     private boolean failed;
     private String errorMessage;

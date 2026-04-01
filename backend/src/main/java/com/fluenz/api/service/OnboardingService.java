@@ -56,18 +56,11 @@ public class OnboardingService {
             if (current != null) {
                 return current;
             }
-            return GenerationProgressResponse.builder()
-                    .pathId(existingGenerating.get().getId())
-                    .phase("QUEUED")
-                    .statusText("A personalized generation job is already running.")
-                    .progressPercent(5)
-                    .complete(false)
-                    .failed(false)
-                    .currentBatch(0)
-                    .totalBatches(0)
-                    .completedTopics(0)
-                    .totalTopics(0)
-                    .build();
+
+            LearningPath stalePath = existingGenerating.get();
+            stalePath.setStatus(PathStatus.FAILED);
+            learningPathRepository.save(stalePath);
+            log.warn("Recovered stale GENERATING learning path {} after backend restart or lost in-memory progress.", stalePath.getId());
         }
 
         Profession profession = null;
@@ -111,7 +104,6 @@ public class OnboardingService {
         try {
             TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
             transactionTemplate.executeWithoutResult(status -> runBackgroundGeneration(pathId, request));
-            generationProgressService.complete(pathId, "Personalized path is ready.");
         } catch (Exception e) {
             log.error("Background onboarding generation failed for path {}: {}", pathId, e.getMessage(), e);
             markGenerationFailed(pathId, e.getMessage());
@@ -224,11 +216,19 @@ public class OnboardingService {
         user.setPreferredLearningMode(LearningMode.PERSONALIZED);
         userRepository.save(user);
         LearningPath saved = learningPathRepository.save(path);
+        generationProgressService.markPublishedText(
+                pathId,
+                "Your personalized learning path is ready. Thumbnails are being filled in."
+        );
 
         UUID savedPathId = saved.getId();
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
+                generationProgressService.markThumbnailHydration(
+                        savedPathId,
+                        "Text is ready. FluenZ is hydrating unique thumbnails in the background."
+                );
                 imagePopulationService.populateImagesAsync(savedPathId);
             }
         });
@@ -327,6 +327,8 @@ public class OnboardingService {
                     .phase("COMPLETE")
                     .statusText("Personalized path is ready.")
                     .progressPercent(100)
+                    .textReady(true)
+                    .assetsPending(false)
                     .complete(true)
                     .failed(false)
                     .currentBatch(0)
@@ -342,6 +344,8 @@ public class OnboardingService {
                     .phase("FAILED")
                     .statusText("Generation failed.")
                     .progressPercent(100)
+                    .textReady(false)
+                    .assetsPending(false)
                     .complete(false)
                     .failed(true)
                     .errorMessage("Generation failed before completion.")
@@ -357,6 +361,8 @@ public class OnboardingService {
                 .phase("QUEUED")
                 .statusText("Generation is still queued.")
                 .progressPercent(5)
+                .textReady(false)
+                .assetsPending(true)
                 .complete(false)
                 .failed(false)
                 .currentBatch(0)
@@ -766,6 +772,8 @@ public class OnboardingService {
                                         .description(llmSituation.getDescription())
                                         .level(parseLevel(llmSituation.getLevel()))
                                         .imageKeyword(llmSituation.getImageKeyword())
+                                        .generationStatus("PENDING_THUMBNAIL")
+                                        .contentValidationStatus("VALIDATED")
                                         .orderIndex(situationIndex)
                                         .topic(topic)
                                         .build();

@@ -23,6 +23,8 @@ public class GenerationProgressService {
                 .totalTopics(0)
                 .currentTopicName(null)
                 .progressPercent(5)
+                .textReady(false)
+                .assetsPending(true)
                 .complete(false)
                 .failed(false)
                 .errorMessage(null)
@@ -70,12 +72,39 @@ public class GenerationProgressService {
                 .progressPercent(90));
     }
 
+    public void markPublishedText(UUID pathId, String statusText) {
+        mutate(pathId, builder -> builder
+                .phase("PUBLISHED_TEXT")
+                .statusText(statusText)
+                .currentTopicName(null)
+                .progressPercent(95)
+                .textReady(true)
+                .assetsPending(true)
+                .complete(false)
+                .failed(false)
+                .errorMessage(null));
+    }
+
+    public void markThumbnailHydration(UUID pathId, String statusText) {
+        mutate(pathId, builder -> builder
+                .phase("THUMBNAIL_HYDRATION")
+                .statusText(statusText)
+                .progressPercent(97)
+                .textReady(true)
+                .assetsPending(true)
+                .complete(false)
+                .failed(false)
+                .errorMessage(null));
+    }
+
     public GenerationProgressResponse complete(UUID pathId, String statusText) {
         mutate(pathId, builder -> builder
                 .phase("COMPLETE")
                 .statusText(statusText)
                 .currentTopicName(null)
                 .progressPercent(100)
+                .textReady(true)
+                .assetsPending(false)
                 .complete(true)
                 .failed(false)
                 .errorMessage(null));
@@ -87,6 +116,7 @@ public class GenerationProgressService {
                 .phase("FAILED")
                 .statusText("Generation failed.")
                 .currentTopicName(null)
+                .assetsPending(false)
                 .failed(true)
                 .complete(false)
                 .errorMessage(errorMessage)
