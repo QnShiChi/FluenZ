@@ -149,6 +149,27 @@ public class LlmService {
         return executeLearningPath(prompt, 12288, "Failed to generate topic batch after 3 attempts");
     }
 
+    public LlmTopic generateSingleTopic(
+            String profession,
+            String level,
+            List<String> contexts,
+            String goals,
+            String personaSummary,
+            LlmBlueprintTopic topic
+    ) {
+        LlmLearningPath response = executeLearningPath(
+                buildTopicBatchPrompt(profession, level, contexts, goals, personaSummary, List.of(topic)),
+                8192,
+                "Failed to generate topic after 3 attempts"
+        );
+
+        if (response.getTopics() == null || response.getTopics().isEmpty()) {
+            throw new RuntimeException("Single topic generation returned no topics");
+        }
+
+        return response.getTopics().get(0);
+    }
+
     private LlmLearningPath executeLearningPath(String prompt, int maxTokens, String failureMessage) {
         for (int attempt = 0; attempt < 3; attempt++) {
             try {

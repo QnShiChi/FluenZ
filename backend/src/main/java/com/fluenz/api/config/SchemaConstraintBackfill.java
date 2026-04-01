@@ -35,6 +35,33 @@ public class SchemaConstraintBackfill implements CommandLineRunner {
                 END $$;
                 """);
 
-        log.info("SchemaConstraintBackfill ensured learning_paths_status_check allows GENERATING/FAILED statuses");
+        jdbcTemplate.execute("""
+                ALTER TABLE learning_paths
+                ADD COLUMN IF NOT EXISTS published_topic_count integer
+                """);
+        jdbcTemplate.execute("""
+                ALTER TABLE learning_paths
+                ADD COLUMN IF NOT EXISTS generated_topic_count integer
+                """);
+        jdbcTemplate.execute("""
+                ALTER TABLE learning_paths
+                ADD COLUMN IF NOT EXISTS total_topic_count integer
+                """);
+
+        jdbcTemplate.execute("""
+                UPDATE learning_paths
+                SET published_topic_count = COALESCE(published_topic_count, 0),
+                    generated_topic_count = COALESCE(generated_topic_count, 0),
+                    total_topic_count = COALESCE(total_topic_count, 0)
+                """);
+
+        jdbcTemplate.execute("ALTER TABLE learning_paths ALTER COLUMN published_topic_count SET DEFAULT 0");
+        jdbcTemplate.execute("ALTER TABLE learning_paths ALTER COLUMN generated_topic_count SET DEFAULT 0");
+        jdbcTemplate.execute("ALTER TABLE learning_paths ALTER COLUMN total_topic_count SET DEFAULT 0");
+        jdbcTemplate.execute("ALTER TABLE learning_paths ALTER COLUMN published_topic_count SET NOT NULL");
+        jdbcTemplate.execute("ALTER TABLE learning_paths ALTER COLUMN generated_topic_count SET NOT NULL");
+        jdbcTemplate.execute("ALTER TABLE learning_paths ALTER COLUMN total_topic_count SET NOT NULL");
+
+        log.info("SchemaConstraintBackfill ensured learning_paths generation metadata columns and status constraint are up to date");
     }
 }

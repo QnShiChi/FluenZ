@@ -73,30 +73,72 @@ public class ImagePopulationService {
 
     @Async("imagePopulationExecutor")
     public void populateImagesAsync(UUID learningPathId) {
+        populateImagesAsync(learningPathId, true);
+    }
+
+    @Async("imagePopulationExecutor")
+    public void populateImagesAsync(UUID learningPathId, boolean markComplete) {
         log.info("Starting async image population for learning path: {}", learningPathId);
 
         try {
             PathImageTasks tasks = txReadOnly.execute(status -> collectTasks(learningPathId));
             if (tasks == null) {
-                generationProgressService.complete(learningPathId, "Personalized path is ready.");
+                if (markComplete) {
+                    markPathGenerationComplete(learningPathId, "Personalized path is ready.");
+                }
                 return;
             }
 
             hydrateSituationThumbnails(tasks.situationTasks);
             hydrateSubPhraseImages(tasks.subPhraseTasks);
 
-            generationProgressService.complete(
-                    learningPathId,
-                    "Personalized path is ready with hydrated thumbnails."
-            );
+            if (markComplete) {
+                markPathGenerationComplete(
+                        learningPathId,
+                        "Personalized path is ready with hydrated thumbnails."
+                );
+            }
             log.info("Completed image population for learning path: {}", learningPathId);
         } catch (Exception e) {
             log.error("Error during async image population for path {}: {}", learningPathId, e.getMessage(), e);
-            generationProgressService.complete(
-                    learningPathId,
-                    "Personalized path is ready. Some thumbnails used fallback assets."
-            );
+            if (markComplete) {
+                markPathGenerationComplete(
+                        learningPathId,
+                        "Personalized path is ready. Some thumbnails used fallback assets."
+                );
+            }
         }
+    }
+
+    private void markPathGenerationComplete(UUID learningPathId, String statusText) {
+        txTemplate.executeWithoutResult(status ->
+                learningPathRepository.findById(learningPathId).ifPresent(path -> {
+                    int totalTopics = safeInt(path.getTotalTopicCount());
+                    int publishedTopics = Math.max(safeInt(path.getPublishedTopicCount()), path.getTopics() == null ? 0 : path.getTopics().size());
+                    int generatedTopics = Math.max(safeInt(path.getGeneratedTopicCount()), publishedTopics);
+
+                    if (publishedTopics > 0) {
+                        path.setStatus(com.fluenz.api.entity.enums.PathStatus.ACTIVE);
+                    }
+                    path.setGenerationPhase("COMPLETE");
+                    path.setGeneratedTopicCount(Math.max(generatedTopics, totalTopics));
+                    path.setPublishedTopicCount(Math.max(publishedTopics, totalTopics));
+                    path.setTotalTopicCount(Math.max(totalTopics, publishedTopics));
+                    learningPathRepository.save(path);
+
+                    generationProgressService.complete(
+                            learningPathId,
+                            statusText,
+                            path.getGeneratedTopicCount(),
+                            path.getPublishedTopicCount(),
+                            path.getTotalTopicCount()
+                    );
+                })
+        );
+    }
+
+    private int safeInt(Integer value) {
+        return value == null ? 0 : value;
     }
 
     private PathImageTasks collectTasks(UUID learningPathId) {

@@ -20,6 +20,7 @@ public class GenerationProgressService {
                 .currentBatch(0)
                 .totalBatches(0)
                 .completedTopics(0)
+                .publishedTopics(0)
                 .totalTopics(0)
                 .currentTopicName(null)
                 .progressPercent(5)
@@ -52,7 +53,7 @@ public class GenerationProgressService {
                 .progressPercent(Math.min(25, totalTopics > 0 ? 20 : 15)));
     }
 
-    public void markBatch(UUID pathId, int currentBatch, int totalBatches, int completedTopics, int totalTopics, String currentTopicName) {
+    public void markBatch(UUID pathId, int currentBatch, int totalBatches, int completedTopics, int publishedTopics, int totalTopics, String currentTopicName) {
         int batchProgress = totalTopics <= 0 ? 25 : 25 + (int) Math.round((completedTopics * 55.0) / totalTopics);
         mutate(pathId, builder -> builder
                 .phase("DETAILS")
@@ -60,6 +61,7 @@ public class GenerationProgressService {
                 .currentBatch(currentBatch)
                 .totalBatches(totalBatches)
                 .completedTopics(completedTopics)
+                .publishedTopics(publishedTopics)
                 .totalTopics(totalTopics)
                 .currentTopicName(currentTopicName)
                 .progressPercent(Math.min(80, Math.max(25, batchProgress))));
@@ -72,10 +74,12 @@ public class GenerationProgressService {
                 .progressPercent(90));
     }
 
-    public void markPublishedText(UUID pathId, String statusText) {
+    public void markPublishedText(UUID pathId, String statusText, int publishedTopics, int totalTopics) {
         mutate(pathId, builder -> builder
                 .phase("PUBLISHED_TEXT")
                 .statusText(statusText)
+                .publishedTopics(publishedTopics)
+                .totalTopics(Math.max(builder.build().getTotalTopics(), totalTopics))
                 .currentTopicName(null)
                 .progressPercent(95)
                 .textReady(true)
@@ -85,10 +89,12 @@ public class GenerationProgressService {
                 .errorMessage(null));
     }
 
-    public void markThumbnailHydration(UUID pathId, String statusText) {
+    public void markThumbnailHydration(UUID pathId, String statusText, int publishedTopics, int totalTopics) {
         mutate(pathId, builder -> builder
                 .phase("THUMBNAIL_HYDRATION")
                 .statusText(statusText)
+                .publishedTopics(publishedTopics)
+                .totalTopics(Math.max(builder.build().getTotalTopics(), totalTopics))
                 .progressPercent(97)
                 .textReady(true)
                 .assetsPending(true)
@@ -97,10 +103,20 @@ public class GenerationProgressService {
                 .errorMessage(null));
     }
 
-    public GenerationProgressResponse complete(UUID pathId, String statusText) {
+    public void updatePublishedTopics(UUID pathId, int publishedTopics, int totalTopics) {
+        mutate(pathId, builder -> builder
+                .publishedTopics(publishedTopics)
+                .totalTopics(Math.max(builder.build().getTotalTopics(), totalTopics))
+                .textReady(publishedTopics > 0 || builder.build().isTextReady()));
+    }
+
+    public GenerationProgressResponse complete(UUID pathId, String statusText, int completedTopics, int publishedTopics, int totalTopics) {
         mutate(pathId, builder -> builder
                 .phase("COMPLETE")
                 .statusText(statusText)
+                .completedTopics(completedTopics)
+                .publishedTopics(publishedTopics)
+                .totalTopics(totalTopics)
                 .currentTopicName(null)
                 .progressPercent(100)
                 .textReady(true)

@@ -20,7 +20,10 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiFunction;
 import java.util.stream.IntStream;
 
 @Service
@@ -28,7 +31,8 @@ import java.util.stream.IntStream;
 @Slf4j
 public class OnboardingService {
 
-    private static final int TOPIC_BATCH_SIZE = 2;
+    private static final int PUBLISH_WINDOW_TOPICS = 4;
+    private static final int TOPIC_CONCURRENCY = 4;
 
     private final UserRepository userRepository;
     private final ProfessionRepository professionRepository;
@@ -81,6 +85,10 @@ public class OnboardingService {
                 .user(user)
                 .profession(profession)
                 .learnerProfile(learnerProfile)
+                .generationPhase("QUEUED")
+                .publishedTopicCount(0)
+                .generatedTopicCount(0)
+                .totalTopicCount(0)
                 .build();
         LearningPath saved = learningPathRepository.save(path);
 
@@ -102,8 +110,7 @@ public class OnboardingService {
 
     public void runBackgroundGenerationSafely(UUID pathId, OnboardingRequest request) {
         try {
-            TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
-            transactionTemplate.executeWithoutResult(status -> runBackgroundGeneration(pathId, request));
+            runBackgroundGeneration(pathId, request);
         } catch (Exception e) {
             log.error("Background onboarding generation failed for path {}: {}", pathId, e.getMessage(), e);
             markGenerationFailed(pathId, e.getMessage());
@@ -111,7 +118,6 @@ public class OnboardingService {
         }
     }
 
-    @Transactional
     public void runBackgroundGeneration(UUID pathId, OnboardingRequest request) {
         LearningPath path = learningPathRepository.findWithGenerationContextById(pathId)
                 .orElseThrow(() -> new RuntimeException("Learning path not found"));
@@ -144,8 +150,7 @@ public class OnboardingService {
         );
 
         if (learnerProfile != null && blankToNull(blueprint.getPersonaSummary()) != null) {
-            learnerProfile.setPersonaSummary(blueprint.getPersonaSummary().trim());
-            learnerProfileRepository.save(learnerProfile);
+            persistPersonaSummary(learnerProfile.getId(), blueprint.getPersonaSummary().trim());
         }
 
         List<LlmService.LlmBlueprintTopic> blueprintTopics = blueprint.getTopics();
@@ -154,153 +159,234 @@ public class OnboardingService {
         }
 
         int totalTopics = blueprintTopics.size();
-        int totalBatches = (int) Math.ceil((double) totalTopics / TOPIC_BATCH_SIZE);
         generationProgressService.markBlueprintReady(
                 pathId,
                 totalTopics,
-                totalBatches,
+                totalTopics,
                 blueprintTopics.get(0).getName()
         );
+        updatePathGenerationMetadata(pathId, "DETAILS", 0, 0, totalTopics);
 
-        List<LlmService.LlmTopic> generatedTopics = new ArrayList<>();
-        for (int batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
-            int fromIndex = batchIndex * TOPIC_BATCH_SIZE;
-            int toIndex = Math.min(fromIndex + TOPIC_BATCH_SIZE, totalTopics);
-            List<LlmService.LlmBlueprintTopic> batchTopics = blueprintTopics.subList(fromIndex, toIndex);
-            String currentTopicName = batchTopics.get(0).getName();
+        AtomicInteger completedTopics = new AtomicInteger(0);
+        String effectivePersonaSummary = blankToNull(blueprint.getPersonaSummary()) != null
+                ? blueprint.getPersonaSummary()
+                : personaSummary;
 
-            generationProgressService.markBatch(
-                    pathId,
-                    batchIndex + 1,
-                    totalBatches,
-                    generatedTopics.size(),
-                    totalTopics,
-                    currentTopicName
-            );
+        int publishWindowSize = Math.min(PUBLISH_WINDOW_TOPICS, totalTopics);
+        List<LlmService.LlmTopic> initiallyPublishedTopics = generateTopicsInWaves(
+                promptProfession,
+                effectiveLevel,
+                promptContexts,
+                promptGoals,
+                effectivePersonaSummary,
+                blueprintTopics.subList(0, publishWindowSize),
+                0,
+                totalTopics,
+                pathId,
+                completedTopics,
+                null
+        );
 
-            LlmService.LlmLearningPath batchResult = generateTopicBatchWithFallback(
+        generationProgressService.markFinalizing(pathId, "Publishing your first personalized lessons.");
+        int publishedTopics = activatePathWithInitialTopics(pathId, effectiveLevel, initiallyPublishedTopics, totalTopics);
+        generationProgressService.markPublishedText(
+                pathId,
+                "Your personalized learning path is ready. FluenZ is finishing the rest in the background.",
+                publishedTopics,
+                totalTopics
+        );
+
+        if (publishWindowSize < totalTopics) {
+            imagePopulationService.populateImagesAsync(pathId, false);
+            generateTopicsInWaves(
                     promptProfession,
                     effectiveLevel,
                     promptContexts,
                     promptGoals,
-                    blankToNull(blueprint.getPersonaSummary()) != null ? blueprint.getPersonaSummary() : personaSummary,
-                    batchTopics,
-                    0
-            );
-
-            if (batchResult.getTopics() == null || batchResult.getTopics().isEmpty()) {
-                throw new RuntimeException("Detail generation returned no topics for batch " + (batchIndex + 1));
-            }
-
-            generatedTopics.addAll(batchResult.getTopics());
-
-            String nextTopicName = toIndex < totalTopics ? blueprintTopics.get(toIndex).getName() : null;
-            generationProgressService.markBatch(
-                    pathId,
-                    batchIndex + 1,
-                    totalBatches,
-                    Math.min(generatedTopics.size(), totalTopics),
+                    effectivePersonaSummary,
+                    blueprintTopics.subList(publishWindowSize, totalTopics),
+                    publishWindowSize,
                     totalTopics,
-                    nextTopicName
+                    pathId,
+                    completedTopics,
+                    (waveStartIndex, waveTopics) -> appendTopicsToActivePath(pathId, waveTopics, waveStartIndex, totalTopics)
             );
         }
 
-        generationProgressService.markFinalizing(pathId, "Saving learning path and scheduling images.");
-        archiveExistingActivePaths(user, pathId);
-
-        path.setTitle(resolvePathLabel(profession, learnerProfile) + " Communication Path");
-        path.setStatus(PathStatus.ACTIVE);
-        replaceTopics(path, buildTopics(path, generatedTopics));
-
-        user.setCurrentLevel(effectiveLevel);
-        user.setPreferredLearningMode(LearningMode.PERSONALIZED);
-        userRepository.save(user);
-        LearningPath saved = learningPathRepository.save(path);
-        generationProgressService.markPublishedText(
+        int finalPublishedCount = readPublishedTopicCount(pathId);
+        updatePathGenerationMetadata(pathId, "THUMBNAIL_HYDRATION", completedTopics.get(), finalPublishedCount, totalTopics);
+        generationProgressService.markThumbnailHydration(
                 pathId,
-                "Your personalized learning path is ready. Thumbnails are being filled in."
+                "Core path is ready. FluenZ is hydrating thumbnails and final polish in the background.",
+                finalPublishedCount,
+                totalTopics
         );
-
-        UUID savedPathId = saved.getId();
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                generationProgressService.markThumbnailHydration(
-                        savedPathId,
-                        "Text is ready. FluenZ is hydrating unique thumbnails in the background."
-                );
-                imagePopulationService.populateImagesAsync(savedPathId);
-            }
-        });
+        imagePopulationService.populateImagesAsync(pathId, true);
     }
 
-    private LlmService.LlmLearningPath generateTopicBatchWithFallback(
+    private List<LlmService.LlmTopic> generateTopicsInWaves(
             String promptProfession,
             Level effectiveLevel,
             List<String> promptContexts,
             String promptGoals,
             String personaSummary,
-            List<LlmService.LlmBlueprintTopic> batchTopics,
-            int depth
+            List<LlmService.LlmBlueprintTopic> topicsToGenerate,
+            int startTopicIndex,
+            int totalTopics,
+            UUID pathId,
+            AtomicInteger completedTopics,
+            BiFunction<Integer, List<LlmService.LlmTopic>, Integer> wavePublishCallback
+    ) {
+        List<LlmService.LlmTopic> orderedTopics = new ArrayList<>(Collections.nCopies(topicsToGenerate.size(), null));
+        int publishedTopics = readPublishedTopicCount(pathId);
+
+        for (int waveStart = 0; waveStart < topicsToGenerate.size(); waveStart += TOPIC_CONCURRENCY) {
+            int waveEnd = Math.min(waveStart + TOPIC_CONCURRENCY, topicsToGenerate.size());
+            List<CompletableFuture<GeneratedTopic>> futures = new ArrayList<>();
+
+            for (int localIndex = waveStart; localIndex < waveEnd; localIndex++) {
+                int absoluteIndex = startTopicIndex + localIndex;
+                LlmService.LlmBlueprintTopic blueprintTopic = topicsToGenerate.get(localIndex);
+                futures.add(CompletableFuture.supplyAsync(
+                        () -> new GeneratedTopic(
+                                absoluteIndex,
+                                generateSingleTopicWithRetry(
+                                        promptProfession,
+                                        effectiveLevel,
+                                        promptContexts,
+                                        promptGoals,
+                                        personaSummary,
+                                        blueprintTopic
+                                )
+                        ),
+                        onboardingGenerationExecutor
+                ));
+            }
+
+            List<LlmService.LlmTopic> waveTopics = new ArrayList<>();
+            String lastTopicName = null;
+            for (CompletableFuture<GeneratedTopic> future : futures) {
+                GeneratedTopic generatedTopic;
+                try {
+                    generatedTopic = future.join();
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to generate topic wave", e);
+                }
+
+                orderedTopics.set(generatedTopic.topicIndex - startTopicIndex, generatedTopic.topic);
+                waveTopics.add(generatedTopic.topic);
+                lastTopicName = generatedTopic.topic.getName();
+                completedTopics.incrementAndGet();
+            }
+
+            updatePathGenerationMetadata(pathId, "DETAILS", completedTopics.get(), null, totalTopics);
+            if (wavePublishCallback != null && !waveTopics.isEmpty()) {
+                publishedTopics = wavePublishCallback.apply(startTopicIndex + waveStart, waveTopics);
+                generationProgressService.updatePublishedTopics(pathId, publishedTopics, totalTopics);
+            }
+
+            generationProgressService.markBatch(
+                    pathId,
+                    completedTopics.get(),
+                    totalTopics,
+                    completedTopics.get(),
+                    publishedTopics,
+                    totalTopics,
+                    lastTopicName
+            );
+        }
+
+        return orderedTopics.stream()
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    private LlmService.LlmTopic generateSingleTopicWithRetry(
+            String promptProfession,
+            Level effectiveLevel,
+            List<String> promptContexts,
+            String promptGoals,
+            String personaSummary,
+            LlmService.LlmBlueprintTopic topic
     ) {
         try {
-            return llmService.generateTopicBatch(
+            return llmService.generateSingleTopic(
                     promptProfession,
                     effectiveLevel.name(),
                     promptContexts,
                     promptGoals,
                     personaSummary,
-                    batchTopics
+                    topic
             );
         } catch (RuntimeException e) {
-            if (batchTopics.size() <= 1) {
-                throw e;
-            }
-
-            int midpoint = batchTopics.size() / 2;
-            List<LlmService.LlmBlueprintTopic> leftTopics = new ArrayList<>(batchTopics.subList(0, midpoint));
-            List<LlmService.LlmBlueprintTopic> rightTopics = new ArrayList<>(batchTopics.subList(midpoint, batchTopics.size()));
-
-            log.warn(
-                    "Topic batch failed for {} topics at depth {}. Splitting into {} and {} topics. Cause: {}",
-                    batchTopics.size(),
-                    depth,
-                    leftTopics.size(),
-                    rightTopics.size(),
-                    e.getMessage()
-            );
-
-            LlmService.LlmLearningPath leftResult = generateTopicBatchWithFallback(
+            log.warn("Single topic generation failed for '{}' and will be retried once: {}", topic.getName(), e.getMessage());
+            return llmService.generateSingleTopic(
                     promptProfession,
-                    effectiveLevel,
+                    effectiveLevel.name(),
                     promptContexts,
                     promptGoals,
                     personaSummary,
-                    leftTopics,
-                    depth + 1
+                    topic
             );
-
-            LlmService.LlmLearningPath rightResult = generateTopicBatchWithFallback(
-                    promptProfession,
-                    effectiveLevel,
-                    promptContexts,
-                    promptGoals,
-                    personaSummary,
-                    rightTopics,
-                    depth + 1
-            );
-
-            LlmService.LlmLearningPath merged = new LlmService.LlmLearningPath();
-            List<LlmService.LlmTopic> mergedTopics = new ArrayList<>();
-            if (leftResult.getTopics() != null) {
-                mergedTopics.addAll(leftResult.getTopics());
-            }
-            if (rightResult.getTopics() != null) {
-                mergedTopics.addAll(rightResult.getTopics());
-            }
-            merged.setTopics(mergedTopics);
-            return merged;
         }
+    }
+
+    private void persistPersonaSummary(UUID learnerProfileId, String personaSummary) {
+        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+        transactionTemplate.executeWithoutResult(status ->
+                learnerProfileRepository.findById(learnerProfileId).ifPresent(profile -> {
+                    profile.setPersonaSummary(personaSummary);
+                    learnerProfileRepository.save(profile);
+                })
+        );
+    }
+
+    private int activatePathWithInitialTopics(UUID pathId, Level effectiveLevel, List<LlmService.LlmTopic> topics, int totalTopics) {
+        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+        return transactionTemplate.execute(status -> {
+            LearningPath path = learningPathRepository.findWithGenerationContextById(pathId)
+                    .orElseThrow(() -> new RuntimeException("Learning path not found"));
+            User user = path.getUser();
+
+            archiveExistingActivePaths(user, pathId);
+
+            path.setTitle(resolvePathLabel(path.getProfession(), path.getLearnerProfile()) + " Communication Path");
+            path.setStatus(PathStatus.ACTIVE);
+            replaceTopics(path, buildTopics(path, topics, 0));
+            path.setGenerationPhase("PUBLISHED_TEXT");
+            path.setPublishedTopicCount(topics.size());
+            path.setGeneratedTopicCount(Math.max(safeInt(path.getGeneratedTopicCount()), topics.size()));
+            path.setTotalTopicCount(Math.max(totalTopics, topics.size()));
+
+            user.setCurrentLevel(effectiveLevel);
+            user.setPreferredLearningMode(LearningMode.PERSONALIZED);
+            userRepository.save(user);
+            learningPathRepository.save(path);
+            return path.getPublishedTopicCount();
+        });
+    }
+
+    private int appendTopicsToActivePath(UUID pathId, List<LlmService.LlmTopic> topics, int startTopicIndex, int totalTopics) {
+        if (topics == null || topics.isEmpty()) {
+            return readPublishedTopicCount(pathId);
+        }
+
+        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+        return transactionTemplate.execute(status -> {
+            LearningPath path = learningPathRepository.findById(pathId)
+                    .orElseThrow(() -> new RuntimeException("Learning path not found"));
+
+            if (path.getTopics() == null) {
+                path.setTopics(new ArrayList<>());
+            }
+            path.getTopics().addAll(buildTopics(path, topics, startTopicIndex));
+            path.setGenerationPhase("PUBLISHED_TEXT");
+            path.setPublishedTopicCount(path.getTopics().size());
+            path.setGeneratedTopicCount(Math.max(safeInt(path.getGeneratedTopicCount()), path.getTopics().size()));
+            path.setTotalTopicCount(Math.max(totalTopics, path.getTopics().size()));
+            learningPathRepository.save(path);
+            return path.getPublishedTopicCount();
+        });
     }
 
     public void markGenerationFailed(UUID pathId, String errorMessage) {
@@ -308,6 +394,7 @@ public class OnboardingService {
         transactionTemplate.executeWithoutResult(status ->
             learningPathRepository.findById(pathId).ifPresent(path -> {
                 path.setStatus(PathStatus.FAILED);
+                path.setGenerationPhase("FAILED");
                 learningPathRepository.save(path);
             })
         );
@@ -318,24 +405,11 @@ public class OnboardingService {
         LearningPath path = loadOwnedPath(email, pathId);
         GenerationProgressResponse current = generationProgressService.get(pathId);
         if (current != null) {
-            return current;
+            return mergeWithDurablePathState(path, current);
         }
 
         if (path.getStatus() == PathStatus.ACTIVE) {
-            return GenerationProgressResponse.builder()
-                    .pathId(pathId)
-                    .phase("COMPLETE")
-                    .statusText("Personalized path is ready.")
-                    .progressPercent(100)
-                    .textReady(true)
-                    .assetsPending(false)
-                    .complete(true)
-                    .failed(false)
-                    .currentBatch(0)
-                    .totalBatches(0)
-                    .completedTopics(path.getTopics() != null ? path.getTopics().size() : 0)
-                    .totalTopics(path.getTopics() != null ? path.getTopics().size() : 0)
-                    .build();
+            return buildDurableProgressFromPath(path);
         }
 
         if (path.getStatus() == PathStatus.FAILED) {
@@ -352,6 +426,7 @@ public class OnboardingService {
                     .currentBatch(0)
                     .totalBatches(0)
                     .completedTopics(0)
+                    .publishedTopics(0)
                     .totalTopics(0)
                     .build();
         }
@@ -368,6 +443,7 @@ public class OnboardingService {
                 .currentBatch(0)
                 .totalBatches(0)
                 .completedTopics(0)
+                .publishedTopics(0)
                 .totalTopics(0)
                 .build();
     }
@@ -376,6 +452,11 @@ public class OnboardingService {
     public Optional<UUID> getLatestGeneratingPathId(String email) {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("User not found"));
+
+        Optional<LearningPath> activePath = learningPathRepository.findFirstByUserAndStatusOrderByCreatedAtDesc(user, PathStatus.ACTIVE);
+        if (activePath.isPresent() && isGenerationInProgress(activePath.get())) {
+            return Optional.of(activePath.get().getId());
+        }
 
         return learningPathRepository.findFirstByUserAndStatusOrderByCreatedAtDesc(user, PathStatus.GENERATING)
                 .map(LearningPath::getId);
@@ -432,8 +513,8 @@ public class OnboardingService {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        LearningPath path = learningPathRepository.findByUserAndStatus(user, PathStatus.ACTIVE)
-                .stream().findFirst()
+        LearningPath path = recoverPublishedGeneratingPathIfNeeded(user)
+                .or(() -> learningPathRepository.findFirstByUserAndStatusOrderByCreatedAtDesc(user, PathStatus.ACTIVE))
                 .orElse(null);
 
         if (path == null) return null;
@@ -453,7 +534,8 @@ public class OnboardingService {
     public boolean hasActivePath(String email) {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("User not found"));
-        return !learningPathRepository.findByUserAndStatus(user, PathStatus.ACTIVE).isEmpty();
+        return recoverPublishedGeneratingPathIfNeeded(user).isPresent()
+                || !learningPathRepository.findByUserAndStatus(user, PathStatus.ACTIVE).isEmpty();
     }
 
     // --- Mappers ---
@@ -464,6 +546,7 @@ public class OnboardingService {
             Set<UUID> completedChunkIds
     ) {
         List<TopicResponse> topicResponses = path.getTopics().stream()
+                .sorted(Comparator.comparingInt(Topic::getOrderIndex))
                 .map(t -> mapTopicResponse(t, progressMap, completedChunkIds))
                 .toList();
 
@@ -481,6 +564,11 @@ public class OnboardingService {
                 .professionName(resolvePathLabel(path.getProfession(), path.getLearnerProfile()))
                 .userLevel(resolvePathLevel(path))
                 .topicCount(topicResponses.size())
+                .publishedTopicCount(Math.max(safeInt(path.getPublishedTopicCount()), topicResponses.size()))
+                .generatedTopicCount(Math.max(safeInt(path.getGeneratedTopicCount()), topicResponses.size()))
+                .totalTopicCount(Math.max(safeInt(path.getTotalTopicCount()), topicResponses.size()))
+                .generationPhase(blankToNull(path.getGenerationPhase()) != null ? path.getGenerationPhase() : "COMPLETE")
+                .generationInProgress(isGenerationInProgress(path))
                 .situationCount(situationCount)
                 .chunkCount(chunkCount)
                 .topics(topicResponses)
@@ -493,6 +581,7 @@ public class OnboardingService {
             Set<UUID> completedChunkIds
     ) {
         List<SituationResponse> situations = topic.getSituations().stream()
+                .sorted(Comparator.comparingInt(Situation::getOrderIndex))
                 .map(s -> mapSituationResponse(s, progressMap, completedChunkIds))
                 .toList();
 
@@ -511,6 +600,7 @@ public class OnboardingService {
             Set<UUID> completedChunkIds
     ) {
         List<ChunkResponse> chunks = situation.getChunks().stream()
+                .sorted(Comparator.comparingInt(Chunk::getOrderIndex))
                 .map(c -> mapChunkResponse(c, progressMap, completedChunkIds))
                 .toList();
 
@@ -532,6 +622,7 @@ public class OnboardingService {
             Set<UUID> completedChunkIds
     ) {
         List<SubPhraseResponse> subPhrases = chunk.getSubPhrases().stream()
+                .sorted(Comparator.comparingInt(SubPhrase::getOrderIndex))
                 .map(sp -> {
                     boolean isLearned = false;
                     boolean isBookmarked = false;
@@ -754,13 +845,161 @@ public class OnboardingService {
         return path;
     }
 
-    private List<Topic> buildTopics(LearningPath path, List<LlmService.LlmTopic> llmTopics) {
+    private Optional<LearningPath> recoverPublishedGeneratingPathIfNeeded(User user) {
+        Optional<LearningPath> active = learningPathRepository.findFirstByUserAndStatusOrderByCreatedAtDesc(user, PathStatus.ACTIVE);
+        if (active.isPresent()) {
+            return active;
+        }
+
+        Optional<LearningPath> generating = learningPathRepository.findFirstByUserAndStatusOrderByCreatedAtDesc(user, PathStatus.GENERATING);
+        if (generating.isEmpty()) {
+            return Optional.empty();
+        }
+
+        LearningPath path = generating.get();
+        int actualTopicCount = path.getTopics() == null ? 0 : path.getTopics().size();
+        if (actualTopicCount == 0) {
+            return Optional.empty();
+        }
+
+        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+        LearningPath recovered = transactionTemplate.execute(status -> {
+            LearningPath managed = learningPathRepository.findById(path.getId())
+                    .orElseThrow(() -> new RuntimeException("Learning path not found"));
+            archiveExistingActivePaths(user, managed.getId());
+            managed.setStatus(PathStatus.ACTIVE);
+            managed.setGenerationPhase(coalesce(blankToNull(managed.getGenerationPhase()), "PUBLISHED_TEXT"));
+            managed.setPublishedTopicCount(Math.max(safeInt(managed.getPublishedTopicCount()), managed.getTopics() == null ? 0 : managed.getTopics().size()));
+            managed.setGeneratedTopicCount(Math.max(safeInt(managed.getGeneratedTopicCount()), managed.getPublishedTopicCount()));
+            managed.setTotalTopicCount(Math.max(safeInt(managed.getTotalTopicCount()), managed.getGeneratedTopicCount()));
+            return learningPathRepository.save(managed);
+        });
+
+        log.warn("Recovered personalized path {} from GENERATING to ACTIVE because published topics already existed.", path.getId());
+        return Optional.ofNullable(recovered);
+    }
+
+    private void updatePathGenerationMetadata(
+            UUID pathId,
+            String phase,
+            Integer generatedTopicCount,
+            Integer publishedTopicCount,
+            Integer totalTopicCount
+    ) {
+        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+        transactionTemplate.executeWithoutResult(status ->
+                learningPathRepository.findById(pathId).ifPresent(path -> {
+                    if (phase != null) {
+                        path.setGenerationPhase(phase);
+                    }
+                    if (generatedTopicCount != null) {
+                        path.setGeneratedTopicCount(Math.max(safeInt(path.getGeneratedTopicCount()), generatedTopicCount));
+                    }
+                    if (publishedTopicCount != null) {
+                        path.setPublishedTopicCount(Math.max(safeInt(path.getPublishedTopicCount()), publishedTopicCount));
+                    }
+                    if (totalTopicCount != null) {
+                        path.setTotalTopicCount(Math.max(safeInt(path.getTotalTopicCount()), totalTopicCount));
+                    }
+                    learningPathRepository.save(path);
+                })
+        );
+    }
+
+    private int readPublishedTopicCount(UUID pathId) {
+        TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManager);
+        Integer publishedCount = transactionTemplate.execute(status ->
+                learningPathRepository.findById(pathId)
+                        .map(path -> Math.max(safeInt(path.getPublishedTopicCount()), path.getTopics() == null ? 0 : path.getTopics().size()))
+                        .orElse(0)
+        );
+        return publishedCount == null ? 0 : publishedCount;
+    }
+
+    private GenerationProgressResponse mergeWithDurablePathState(LearningPath path, GenerationProgressResponse current) {
+        int publishedTopics = Math.max(current.getPublishedTopics(), Math.max(safeInt(path.getPublishedTopicCount()), path.getTopics() == null ? 0 : path.getTopics().size()));
+        int generatedTopics = Math.max(current.getCompletedTopics(), Math.max(safeInt(path.getGeneratedTopicCount()), publishedTopics));
+        int totalTopics = Math.max(current.getTotalTopics(), Math.max(safeInt(path.getTotalTopicCount()), generatedTopics));
+        boolean generationInProgress = isGenerationInProgress(path);
+
+        return current.toBuilder()
+                .phase(generationInProgress ? coalesce(blankToNull(path.getGenerationPhase()), current.getPhase()) : "COMPLETE")
+                .completedTopics(generatedTopics)
+                .publishedTopics(publishedTopics)
+                .totalTopics(totalTopics)
+                .textReady(current.isTextReady() || publishedTopics > 0 || path.getStatus() == PathStatus.ACTIVE)
+                .assetsPending(generationInProgress)
+                .complete(!generationInProgress && path.getStatus() == PathStatus.ACTIVE)
+                .failed(path.getStatus() == PathStatus.FAILED || current.isFailed())
+                .build();
+    }
+
+    private GenerationProgressResponse buildDurableProgressFromPath(LearningPath path) {
+        int publishedTopics = Math.max(safeInt(path.getPublishedTopicCount()), path.getTopics() == null ? 0 : path.getTopics().size());
+        int generatedTopics = Math.max(safeInt(path.getGeneratedTopicCount()), publishedTopics);
+        int totalTopics = Math.max(safeInt(path.getTotalTopicCount()), generatedTopics);
+        boolean generationInProgress = isGenerationInProgress(path);
+        String phase = generationInProgress
+                ? coalesce(blankToNull(path.getGenerationPhase()), publishedTopics > 0 ? "PUBLISHED_TEXT" : "DETAILS")
+                : "COMPLETE";
+
+        return GenerationProgressResponse.builder()
+                .pathId(path.getId())
+                .phase(phase)
+                .statusText(generationInProgress ? "FluenZ is still publishing the rest of your personalized path." : "Personalized path is ready.")
+                .progressPercent(generationInProgress && totalTopics > 0
+                        ? Math.min(97, Math.max(35, 35 + (int) Math.round((publishedTopics * 62.0) / totalTopics)))
+                        : 100)
+                .textReady(publishedTopics > 0)
+                .assetsPending(generationInProgress)
+                .complete(!generationInProgress)
+                .failed(false)
+                .currentBatch(generatedTopics)
+                .totalBatches(totalTopics)
+                .completedTopics(generatedTopics)
+                .publishedTopics(publishedTopics)
+                .totalTopics(totalTopics)
+                .build();
+    }
+
+    private boolean isGenerationInProgress(LearningPath path) {
+        if (path.getStatus() == PathStatus.GENERATING) {
+            return true;
+        }
+        if (path.getStatus() != PathStatus.ACTIVE) {
+            return false;
+        }
+
+        String phase = blankToNull(path.getGenerationPhase());
+        int publishedTopics = Math.max(safeInt(path.getPublishedTopicCount()), path.getTopics() == null ? 0 : path.getTopics().size());
+        int totalTopics = Math.max(safeInt(path.getTotalTopicCount()), publishedTopics);
+
+        if ("COMPLETE".equalsIgnoreCase(phase)) {
+            return false;
+        }
+
+        if ("THUMBNAIL_HYDRATION".equalsIgnoreCase(phase)) {
+            return true;
+        }
+
+        return totalTopics > publishedTopics;
+    }
+
+    private int safeInt(Integer value) {
+        return value == null ? 0 : value;
+    }
+
+    private String coalesce(String first, String fallback) {
+        return first != null ? first : fallback;
+    }
+
+    private List<Topic> buildTopics(LearningPath path, List<LlmService.LlmTopic> llmTopics, int startTopicIndex) {
         return IntStream.range(0, llmTopics.size())
                 .mapToObj(topicIndex -> {
                     LlmService.LlmTopic llmTopic = llmTopics.get(topicIndex);
                     Topic topic = Topic.builder()
                             .name(llmTopic.getName())
-                            .orderIndex(topicIndex)
+                            .orderIndex(startTopicIndex + topicIndex)
                             .learningPath(path)
                             .build();
 
@@ -832,6 +1071,8 @@ public class OnboardingService {
                 })
                 .toList();
     }
+
+    private record GeneratedTopic(int topicIndex, LlmService.LlmTopic topic) {}
 
     private void replaceTopics(LearningPath path, List<Topic> topics) {
         if (path.getTopics() == null) {

@@ -25,9 +25,9 @@ public class AsyncConfig {
     @Bean(name = "onboardingGenerationExecutor")
     public Executor onboardingGenerationExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(2);
-        executor.setMaxPoolSize(4);
-        executor.setQueueCapacity(20);
+        executor.setCorePoolSize(6);
+        executor.setMaxPoolSize(8);
+        executor.setQueueCapacity(50);
         executor.setThreadNamePrefix("onboarding-gen-");
         executor.initialize();
         return executor;

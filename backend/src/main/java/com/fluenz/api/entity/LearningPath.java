@@ -35,6 +35,21 @@ public class LearningPath extends BaseEntity {
     @JoinColumn(name = "learner_profile_id")
     private LearnerProfile learnerProfile;
 
+    @Column(length = 64)
+    private String generationPhase;
+
+    @Builder.Default
+    @Column(name = "published_topic_count")
+    private Integer publishedTopicCount = 0;
+
+    @Builder.Default
+    @Column(name = "generated_topic_count")
+    private Integer generatedTopicCount = 0;
+
+    @Builder.Default
+    @Column(name = "total_topic_count")
+    private Integer totalTopicCount = 0;
+
     @OneToMany(mappedBy = "learningPath", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<Topic> topics = new ArrayList<>();

@@ -18,6 +18,7 @@ public class GenerationProgressResponse {
     private int currentBatch;
     private int totalBatches;
     private int completedTopics;
+    private int publishedTopics;
     private int totalTopics;
     private String currentTopicName;
     private int progressPercent;
